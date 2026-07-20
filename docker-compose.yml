@@ -1,0 +1,25 @@
+name: portcullio
+
+services:
+  agent:
+    build:
+      context: ./agent
+    privileged: true
+    volumes:
+      - ./data/lockers:/lockers
+      - ./data/mounts:/mounts:rshared
+      - ./data/socket:/socket
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: ./ui
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/socket:/socket:ro
+      - ./data/ui-state:/state
+    restart: unless-stopped
+    depends_on:
+      - agent

@@ -1,0 +1,389 @@
+"use strict";
+
+const path = require("path");
+const express = require("express");
+const cookieParser = require("cookie-parser");
+const auth = require("./auth");
+const state = require("./state");
+const views = require("./views");
+const agentClient = require("./agentClient");
+const loginThrottle = require("./loginThrottle");
+
+const PORT = process.env.PORT || 8080;
+
+// Fixed socket path //
+const AGENT_SOCKET_PATH = "/socket/agent.sock";
+
+const VAULT_ID_PATTERN = /^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$/;
+
+const app = express();
+
+// prevent iframe //
+app.use((req, res, next) => {
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+  next();
+});
+
+app.use(cookieParser());
+app.use(express.urlencoded({ extended: false }));
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/", (req, res) => {
+  if (!auth.hasAdmin()) return res.redirect(302, "/setup");
+  const token = req.cookies[auth.SESSION_COOKIE];
+  if (auth.isValidSession(token)) return res.redirect(302, "/dashboard");
+  return res.redirect(302, "/login");
+});
+
+// Setup only works if no admin //
+app.get("/setup", (req, res) => {
+  if (auth.hasAdmin())
+    return res.status(404).type("html").send(views.notFoundPage());
+  res.type("html").send(views.setupPage());
+});
+
+app.post("/setup", (req, res) => {
+  if (auth.hasAdmin())
+    return res.status(404).type("html").send(views.notFoundPage());
+  const { password, confirm } = req.body;
+  if (!password || password.length < 8) {
+    return res
+      .status(400)
+      .type("html")
+      .send(views.setupPage("Password must be at least 8 characters."));
+  }
+  if (password !== confirm) {
+    return res
+      .status(400)
+      .type("html")
+      .send(views.setupPage("Passwords do not match."));
+  }
+  auth.setAdminPassword(password);
+  res.redirect(302, "/login");
+});
+
+app.get("/login", (req, res) => {
+  if (!auth.hasAdmin()) return res.redirect(302, "/setup");
+  res.type("html").send(views.loginPage());
+});
+
+app.post("/login", (req, res) => {
+  if (!auth.hasAdmin()) return res.redirect(302, "/setup");
+  const lockedMs = loginThrottle.msUntilUnlocked(req.ip);
+  if (lockedMs > 0) {
+    const minutes = Math.ceil(lockedMs / 60000);
+    return res
+      .status(429)
+      .type("html")
+      .send(
+        views.loginPage(
+          `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+        ),
+      );
+  }
+  if (!auth.checkAdminPassword(req.body.password || "")) {
+    loginThrottle.recordFailure(req.ip);
+    return res
+      .status(401)
+      .type("html")
+      .send(views.loginPage("Incorrect password."));
+  }
+  loginThrottle.recordSuccess(req.ip);
+  const token = auth.createSession();
+  res.cookie(auth.SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "strict",
+    path: "/",
+  });
+  res.redirect(302, "/dashboard");
+});
+
+app.post("/logout", auth.requireAuth, (req, res) => {
+  auth.destroySession(req.cookies[auth.SESSION_COOKIE]);
+  res.clearCookie(auth.SESSION_COOKIE);
+  res.redirect(302, "/login");
+});
+
+app.get("/recover", (req, res) => {
+  res.type("html").send(views.recoverPage());
+});
+
+app.post("/recover/generate", (req, res) => {
+  const code = auth.createRecoveryCode();
+  if (code === null) {
+    return res
+      .status(429)
+      .type("html")
+      .send(
+        views.recoverPage(
+          "A code was already generated in the last 10 minutes -- check this container's log, or wait before generating a new one.",
+        ),
+      );
+  }
+  auth.logRecoveryCode(code);
+  res.type("html").send(views.recoverPage(null, true));
+});
+
+app.post("/recover", (req, res) => {
+  const { code, password, confirm } = req.body;
+  if (!code) {
+    return res
+      .status(400)
+      .type("html")
+      .send(views.recoverPage("Recovery code is required."));
+  }
+  if (!password || password.length < 8) {
+    return res
+      .status(400)
+      .type("html")
+      .send(views.recoverPage("Password must be at least 8 characters."));
+  }
+  if (password !== confirm) {
+    return res
+      .status(400)
+      .type("html")
+      .send(views.recoverPage("Passwords do not match."));
+  }
+  if (!auth.consumeRecoveryCode(code, password)) {
+    return res
+      .status(400)
+      .type("html")
+      .send(views.recoverPage("Invalid or expired recovery code."));
+  }
+  res.redirect(302, "/login");
+});
+
+// Renders vault status and linked services //
+async function renderDashboard(res, error) {
+  try {
+    const statusResp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_STATUS,
+    });
+    if (!statusResp.ok) {
+      return res
+        .type("html")
+        .send(
+          views.dashboardPage({ vaults: [], error: error || statusResp.error }),
+        );
+    }
+    const vaults = (statusResp.vaults || []).map((v) => ({
+      ...v,
+      services: state.getVaultServices(v.vault_id),
+    }));
+    res.type("html").send(views.dashboardPage({ vaults, error }));
+  } catch (err) {
+    res.type("html").send(
+      views.dashboardPage({
+        vaults: [],
+        error: `Could not reach agent: ${err.message}`,
+      }),
+    );
+  }
+}
+
+// Render disk space left //
+async function renderNewVault(res, error) {
+  try {
+    const spaceResp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_SPACE,
+    });
+    const availableMB = spaceResp.ok ? spaceResp.available_mb : null;
+    res.type("html").send(views.newVaultPage({ error, availableMB }));
+  } catch (err) {
+    res.type("html").send(
+      views.newVaultPage({
+        error: error || `Could not reach agent: ${err.message}`,
+      }),
+    );
+  }
+}
+
+app.get("/dashboard", auth.requireAuth, (req, res) => {
+  renderDashboard(res);
+});
+
+app.get("/vaults/new", auth.requireAuth, (req, res) => {
+  renderNewVault(res);
+});
+
+app.post("/vaults", auth.requireAuth, async (req, res) => {
+  const { vault_id, size_mb, passphrase, confirm } = req.body;
+  if (!VAULT_ID_PATTERN.test(vault_id || "")) {
+    return renderNewVault(res, "Invalid vault ID.");
+  }
+  const sizeMB = parseInt(size_mb, 10);
+  if (!Number.isInteger(sizeMB) || sizeMB < 32) {
+    return renderNewVault(res, "Size must be at least 32 MB.");
+  }
+  if (!passphrase || passphrase.length < 8) {
+    return renderNewVault(res, "Passphrase must be at least 8 characters.");
+  }
+  if (passphrase !== confirm) {
+    return renderNewVault(res, "Passphrases do not match.");
+  }
+  try {
+    const spaceResp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_SPACE,
+    });
+    if (spaceResp.ok && sizeMB > spaceResp.available_mb) {
+      return renderNewVault(
+        res,
+        `Size exceeds available space (${spaceResp.available_mb} MB free).`,
+      );
+    }
+    const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_CREATE,
+      vault_id,
+      size_mb: sizeMB,
+      passphrase: Buffer.from(passphrase, "utf8"),
+    });
+    if (!resp.ok) return renderNewVault(res, resp.error);
+    res.redirect(302, "/dashboard");
+  } catch (err) {
+    renderNewVault(res, `Could not reach agent: ${err.message}`);
+  }
+});
+
+app.post("/vaults/:id/unseal", auth.requireAuth, async (req, res) => {
+  const vaultId = req.params.id;
+  if (!VAULT_ID_PATTERN.test(vaultId)) {
+    return renderDashboard(res, "Invalid vault ID.");
+  }
+  if (!req.body.passphrase) {
+    return renderDashboard(res, "Passphrase is required.");
+  }
+  try {
+    const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_UNSEAL,
+      vault_id: vaultId,
+      passphrase: Buffer.from(req.body.passphrase, "utf8"),
+      services: state.getVaultServices(vaultId),
+    });
+    if (!resp.ok) return renderDashboard(res, resp.error);
+    res.redirect(302, "/dashboard");
+  } catch (err) {
+    renderDashboard(res, `Could not reach agent: ${err.message}`);
+  }
+});
+
+app.post("/vaults/:id/seal", auth.requireAuth, async (req, res) => {
+  const vaultId = req.params.id;
+  if (!VAULT_ID_PATTERN.test(vaultId)) {
+    return renderDashboard(res, "Invalid vault ID.");
+  }
+  try {
+    const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_SEAL,
+      vault_id: vaultId,
+      services: state.getVaultServices(vaultId),
+    });
+    if (!resp.ok) return renderDashboard(res, resp.error);
+    res.redirect(302, "/dashboard");
+  } catch (err) {
+    renderDashboard(res, `Could not reach agent: ${err.message}`);
+  }
+});
+
+async function renderSettings(res, vaultId, { error, saved } = {}) {
+  try {
+    const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_SERVICES,
+    });
+    if (!resp.ok) {
+      return res.type("html").send(
+        views.settingsPage({
+          vaultId,
+          availableServices: [],
+          linkedServices: state.getVaultServices(vaultId),
+          error: error || resp.error,
+        }),
+      );
+    }
+    res.type("html").send(
+      views.settingsPage({
+        vaultId,
+        availableServices: resp.services || [],
+        linkedServices: state.getVaultServices(vaultId),
+        error,
+        saved,
+      }),
+    );
+  } catch (err) {
+    res.type("html").send(
+      views.settingsPage({
+        vaultId,
+        availableServices: [],
+        linkedServices: state.getVaultServices(vaultId),
+        error: `Could not reach agent: ${err.message}`,
+      }),
+    );
+  }
+}
+
+app.get("/vaults/:id/settings", auth.requireAuth, (req, res) => {
+  const vaultId = req.params.id;
+  if (!VAULT_ID_PATTERN.test(vaultId)) {
+    return res.status(404).type("html").send(views.notFoundPage());
+  }
+  renderSettings(res, vaultId);
+});
+
+app.post("/vaults/:id/settings", auth.requireAuth, async (req, res) => {
+  const vaultId = req.params.id;
+  if (!VAULT_ID_PATTERN.test(vaultId)) {
+    return res.status(404).type("html").send(views.notFoundPage());
+  }
+
+  const raw = req.body.services;
+  const requested = Array.isArray(raw) ? raw : raw ? [raw] : [];
+
+  try {
+    const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_SERVICES,
+    });
+    if (!resp.ok) return renderSettings(res, vaultId, { error: resp.error });
+    // Defense in depth only -- agent independently re-validates every service name regardless.
+    const known = new Set(resp.services || []);
+    const services = requested.filter((s) => known.has(s));
+    state.setVaultServices(vaultId, services);
+    renderSettings(res, vaultId, { saved: true });
+  } catch (err) {
+    renderSettings(res, vaultId, {
+      error: `Could not reach agent: ${err.message}`,
+    });
+  }
+});
+
+app.post("/vaults/:id/destroy", auth.requireAuth, async (req, res) => {
+  const vaultId = req.params.id;
+  if (!VAULT_ID_PATTERN.test(vaultId)) {
+    return res.status(404).type("html").send(views.notFoundPage());
+  }
+  const { confirm_id, admin_password } = req.body;
+  if (confirm_id !== vaultId) {
+    return renderSettings(res, vaultId, {
+      error: "Retyped vault ID does not match.",
+    });
+  }
+  if (!auth.checkAdminPassword(admin_password || "")) {
+    return renderSettings(res, vaultId, { error: "Incorrect admin password." });
+  }
+  try {
+    const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_DESTROY,
+      vault_id: vaultId,
+    });
+    if (!resp.ok) return renderSettings(res, vaultId, { error: resp.error });
+    state.deleteVaultServices(vaultId);
+    res.redirect(302, "/dashboard");
+  } catch (err) {
+    renderSettings(res, vaultId, {
+      error: `Could not reach agent: ${err.message}`,
+    });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`portcullio ui: listening on :${PORT}`);
+});
