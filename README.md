@@ -2,7 +2,41 @@
 
 # Portcullio
 
+[![Latest release](https://img.shields.io/github/v/release/IvanBez42/Portcullio)](https://github.com/IvanBez42/Portcullio/releases)
+
 Portcullio is a project to simplify the process of encrypting LUKS partitions for Docker Services. Lowers the barrier of entry for homelabs to have encrypt-at-rest fully automated by including a User Interface to easily manage and decrypt storage for services anywhere. Lockers can easily be linked to any docker services, allowing a single unlock to bring up any specified services that were fully encrypted.
+
+## Using Prebuilt Images:
+
+Instead of building from source, you can pull the published images directly:
+
+```yaml
+name: portcullio
+
+services:
+  agent:
+    image: ghcr.io/ivanbez42/portcullio-agent:latest
+    privileged: true
+    volumes:
+      - ./data/lockers:/lockers
+      - ./data/mounts:/mounts:rshared
+      - ./data/socket:/socket
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  ui:
+    image: ghcr.io/ivanbez42/portcullio-ui:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/socket:/socket:ro
+      - ./data/ui-state:/state
+    restart: unless-stopped
+    depends_on:
+      - agent
+```
+
+---
 
 ## Basic Docker Setup:
 
@@ -58,3 +92,7 @@ To set any of these, add an `environment:` block to the relevant service in the 
 _Full Disk encryption:_ Point the Lockers path to an external drive , and then in the interface create a locker the size of the full external device. All services can dynamically use space within this external storage.
 
 _Per Service encryption:_ Create a locker for each service you want to encrypt, then allocate that service to it. Note this service will have a static size!
+
+## License:
+
+Portcullio is licensed under the [GNU General Public License v3.0](LICENSE).
