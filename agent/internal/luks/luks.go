@@ -2,11 +2,29 @@ package luks
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/IvanBez42/Portcullio/agent/internal/shellout"
 )
+
+// Best-effort: loads the host's loop kernel module if /dev/loop-control isn't
+// present yet (common on freshly-booted hosts where nothing has used loop
+// devices before). Requires /lib/modules from the host to be mounted in, and
+// CAP_SYS_MODULE (both true under docker-compose.yml's privileged agent). //
+func EnsureLoopSupport() error {
+	if _, err := os.Stat("/dev/loop-control"); err == nil {
+		return nil
+	}
+	if _, err := shellout.Run(nil, "modprobe", "loop"); err != nil {
+		return fmt.Errorf("luks: modprobe loop: %w", err)
+	}
+	if _, err := os.Stat("/dev/loop-control"); err != nil {
+		return fmt.Errorf("luks: loop module loaded but /dev/loop-control still missing: %w", err)
+	}
+	return nil
+}
 
 // Checks if imagePath is attached to a loop device //
 func FindLoopDevice(imagePath string) (loopPath string, ok bool, err error) {

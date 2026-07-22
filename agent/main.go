@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/IvanBez42/Portcullio/agent/internal/luks"
 	"github.com/IvanBez42/Portcullio/agent/internal/socket"
 )
 
@@ -31,6 +32,10 @@ func main() {
 	}
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
 		log.Fatalf("portcullio agent: create socket dir for %s: %v", socketPath, err)
+	}
+
+	if err := luks.EnsureLoopSupport(); err != nil {
+		log.Printf("portcullio agent: warning: %v (vault create/unseal will fail until loop devices are available)", err)
 	}
 
 	handler := socket.NewAgentHandler(cfg)
