@@ -22,6 +22,7 @@ services:
       - ./data/mounts:/mounts:rshared
       - ./data/socket:/socket
       - /var/run/docker.sock:/var/run/docker.sock
+      - /lib/modules:/lib/modules:ro
     restart: unless-stopped
 
   ui:
@@ -53,6 +54,7 @@ services:
       - ./data/mounts:/mounts:rshared
       - ./data/socket:/socket
       - /var/run/docker.sock:/var/run/docker.sock
+      - /lib/modules:/lib/modules:ro
     restart: unless-stopped
 
   ui:
