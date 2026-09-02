@@ -30,6 +30,7 @@ function startFakeAgent(handleRequest) {
   });
 }
 
+// A Buffer passphrase goes out as base64, then gets wiped from memory right after //
 test("callAgent sends the verb and base64-encodes a Buffer passphrase, then zeroes it", async () => {
   let seen;
   const { server, socketPath } = await startFakeAgent((req) => {
@@ -62,6 +63,7 @@ test("callAgent sends the verb and base64-encodes a Buffer passphrase, then zero
   }
 });
 
+// Fields you don't pass shouldn't sneak into the request at all //
 test("callAgent omits passphrase/services/size_mb when not provided", async () => {
   let seen;
   const { server, socketPath } = await startFakeAgent((req) => {
@@ -80,6 +82,7 @@ test("callAgent omits passphrase/services/size_mb when not provided", async () =
   }
 });
 
+// A string password can't be safely wiped from memory -- rejected before it's even sent //
 test("callAgent rejects a string passphrase outright, since a string can never be zeroed", async () => {
   const { server, socketPath } = await startFakeAgent(() => ({ ok: true }));
   try {
@@ -96,6 +99,7 @@ test("callAgent rejects a string passphrase outright, since a string can never b
   }
 });
 
+// An error reported by the agent is a normal reply, not a broken connection //
 test("callAgent resolves (not rejects) an application-level ok:false response", async () => {
   const { server, socketPath } = await startFakeAgent(() => ({
     ok: false,

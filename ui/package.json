@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "cookie-parser": "^1.4.6",
-    "express": "^5.2.1"
+    "csrf-csrf": "^4.0.3",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0"
   }
 }
