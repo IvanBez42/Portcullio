@@ -28,6 +28,11 @@ function backLink(href, label) {
   return `<a class="back-link" href="${href}">${backIcon}${escapeHtml(label)}</a>`;
 }
 
+// Hidden field every form submits its CSRF token through //
+function csrfField(csrfToken) {
+  return `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">`;
+}
+
 const githubIcon = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>`;
 
 const STATE_LABELS = {
@@ -48,13 +53,14 @@ function serviceChips(services) {
   return `<div class="linked-services">${services.map((s) => `<span class="service-chip">${escapeHtml(s)}</span>`).join("")}</div>`;
 }
 
-function setupPage(error) {
+function setupPage(error, csrfToken) {
   return layout(
     "Portcullio - initial setup",
     `
     <h1>Portcullio - initial setup</h1>
     ${error ? `<p class="error-text">${escapeHtml(error)}</p>` : ""}
     <form method="post" action="/setup" class="settings-form">
+      ${csrfField(csrfToken)}
       <label>Admin password <input type="password" name="password" required minlength="8"></label>
       <label>Confirm <input type="password" name="confirm" required minlength="8"></label>
       <button type="submit">Set admin password</button>
@@ -63,13 +69,14 @@ function setupPage(error) {
   );
 }
 
-function loginPage(error) {
+function loginPage(error, csrfToken) {
   return layout(
     "Portcullio - log in",
     `
     <h1>Portcullio - log in</h1>
     ${error ? `<p class="error-text">${escapeHtml(error)}</p>` : ""}
     <form method="post" action="/login" class="settings-form stacked-form">
+      ${csrfField(csrfToken)}
       <label for="login-password">Password</label>
       <input type="password" id="login-password" name="password" required>
       <button type="submit">Log in</button>
@@ -79,7 +86,7 @@ function loginPage(error) {
   );
 }
 
-function recoverPage(error, generated) {
+function recoverPage(error, generated, csrfToken) {
   return layout(
     "Portcullio - recover admin password",
     `
@@ -92,6 +99,7 @@ function recoverPage(error, generated) {
 
     <h2>1. Get a code</h2>
     <form method="post" action="/recover/generate" class="settings-form">
+      ${csrfField(csrfToken)}
       <p class="vault-detail">Receive a one-time code in the container's log by:</p>
       <div class="command-box" role="button" tabindex="0" aria-label="Copy command">
         <code>docker compose exec ui node generate-recovery-code.js</code>
@@ -103,6 +111,7 @@ function recoverPage(error, generated) {
 
     <h2>2. Reset Password</h2>
     <form method="post" action="/recover" class="settings-form stacked-form">
+      ${csrfField(csrfToken)}
       <label for="recover-code">Recovery code</label>
       <input type="text" id="recover-code" name="code" required autocomplete="off">
       <hr class="field-divider">
@@ -121,7 +130,21 @@ function notFoundPage() {
   return layout("Not found", `<h1>Not found</h1>`);
 }
 
-function vaultRow(vault) {
+// Shown when a form's CSRF token is missing or stale //
+function forbiddenPage() {
+  return layout(
+    "Portcullio - request rejected",
+    `
+    <div class="page-header">
+      <h1>Request rejected</h1>
+      ${backLink("/login", "Log in")}
+    </div>
+    <p class="error-text">Your form session expired or the request could not be verified. Go back and try again.</p>
+  `,
+  );
+}
+
+function vaultRow(vault, csrfToken) {
   const id = escapeHtml(vault.vault_id);
   const state = escapeHtml(vault.state);
   const gear = `<a class="gear-link" href="/vaults/${id}/settings" title="Settings" aria-label="${id} settings">${gearIcon}</a>`;
@@ -132,6 +155,7 @@ function vaultRow(vault) {
     body = `
       ${statusBadge(vault.state)}
       <form method="post" action="/vaults/${id}/unseal" class="unlock-form">
+        ${csrfField(csrfToken)}
         <input type="password" name="passphrase" placeholder="Passphrase" required>
         <button type="submit">Unlock</button>
       </form>`;
@@ -141,6 +165,7 @@ function vaultRow(vault) {
       ${usageDetail(vault.used_mb, vault.total_mb)}
       ${serviceChips(vault.services)}
       <form method="post" action="/vaults/${id}/seal" class="lock-form">
+        ${csrfField(csrfToken)}
         <button type="submit">Lock</button>
       </form>`;
   } else {
@@ -184,9 +209,9 @@ function sizeControl(availableMB) {
     <p class="vault-detail">${hint}</p>`;
 }
 
-function dashboardPage({ vaults, error }) {
+function dashboardPage({ vaults, error, csrfToken }) {
   const list = vaults.length
-    ? `<div class="vault-grid">${vaults.map(vaultRow).join("")}</div>`
+    ? `<div class="vault-grid">${vaults.map((v) => vaultRow(v, csrfToken)).join("")}</div>`
     : `<p>No vaults yet.</p>`;
   return layout(
     "Portcullio",
@@ -198,7 +223,7 @@ function dashboardPage({ vaults, error }) {
       </div>
       <div class="page-header-actions">
         <a class="new-vault-btn" href="/vaults/new">+ Vault</a>
-        <form method="post" action="/logout"><button type="submit" class="logout-btn">Log out</button></form>
+        <form method="post" action="/logout">${csrfField(csrfToken)}<button type="submit" class="logout-btn">Log out</button></form>
       </div>
     </div>
     ${error ? `<p class="error-text">${escapeHtml(error)}</p>` : ""}
@@ -208,7 +233,7 @@ function dashboardPage({ vaults, error }) {
 }
 
 // New vault page //
-function newVaultPage({ error, availableMB }) {
+function newVaultPage({ error, availableMB, csrfToken }) {
   return layout(
     "Portcullio - new vault",
     `
@@ -218,6 +243,7 @@ function newVaultPage({ error, availableMB }) {
     </div>
     ${error ? `<p class="error-text">${escapeHtml(error)}</p>` : ""}
     <form method="post" action="/vaults" class="new-vault-form">
+      ${csrfField(csrfToken)}
       <label>Vault ID <input type="text" name="vault_id" pattern="[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}" required></label>
       ${sizeControl(availableMB)}
       <label>Passphrase <input type="password" name="passphrase" required minlength="8"></label>
@@ -236,6 +262,7 @@ function settingsPage({
   linkedServices,
   error,
   saved,
+  csrfToken,
 }) {
   const id = escapeHtml(vaultId);
   const linkedSet = new Set(linkedServices);
@@ -261,6 +288,7 @@ function settingsPage({
 
     <h2>Linked services</h2>
     <form method="post" action="/vaults/${id}/settings" class="settings-form">
+      ${csrfField(csrfToken)}
       ${checkboxes}
       <button type="submit">Save</button>
     </form>
@@ -268,6 +296,7 @@ function settingsPage({
     <h2 class="danger-heading">Delete this vault</h2>
     <p>Permanently deletes the vault's backing file. Cannot be undone.</p>
     <form method="post" action="/vaults/${id}/destroy" class="settings-form">
+      ${csrfField(csrfToken)}
       <label>Retype vault ID to confirm <input type="text" name="confirm_id" required></label>
       <label>Admin password <input type="password" name="admin_password" required></label>
       <button type="submit" class="danger-btn">Delete vault</button>
@@ -281,6 +310,7 @@ module.exports = {
   loginPage,
   recoverPage,
   notFoundPage,
+  forbiddenPage,
   dashboardPage,
   newVaultPage,
   settingsPage,

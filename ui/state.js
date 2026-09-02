@@ -3,11 +3,17 @@
 const fs = require("fs");
 const path = require("path");
 
-const STATE_DIR = "/state";
+const STATE_DIR = process.env.PORTCULLIO_STATE_DIR || "/state";
 const STATE_FILE = path.join(STATE_DIR, "state.json");
 
 function emptyState() {
-  return { admin: null, sessions: {}, vaultServices: {}, recoveryCode: null };
+  return {
+    admin: null,
+    sessions: {},
+    vaultServices: {},
+    recoveryCode: null,
+    csrfSecret: null,
+  };
 }
 
 // Parse or initialize state //

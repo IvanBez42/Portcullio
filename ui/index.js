@@ -8,6 +8,7 @@ const state = require("./state");
 const views = require("./views");
 const agentClient = require("./agentClient");
 const loginThrottle = require("./loginThrottle");
+const csrf = require("./csrf");
 
 const PORT = process.env.PORT || 8080;
 
@@ -28,6 +29,7 @@ app.use((req, res, next) => {
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
+app.use(csrf.doubleCsrfProtection);
 
 app.get("/", (req, res) => {
   if (!auth.hasAdmin()) return res.redirect(302, "/setup");
@@ -40,7 +42,7 @@ app.get("/", (req, res) => {
 app.get("/setup", (req, res) => {
   if (auth.hasAdmin())
     return res.status(404).type("html").send(views.notFoundPage());
-  res.type("html").send(views.setupPage());
+  res.type("html").send(views.setupPage(null, req.csrfToken()));
 });
 
 app.post("/setup", (req, res) => {
@@ -51,13 +53,18 @@ app.post("/setup", (req, res) => {
     return res
       .status(400)
       .type("html")
-      .send(views.setupPage("Password must be at least 8 characters."));
+      .send(
+        views.setupPage(
+          "Password must be at least 8 characters.",
+          req.csrfToken(),
+        ),
+      );
   }
   if (password !== confirm) {
     return res
       .status(400)
       .type("html")
-      .send(views.setupPage("Passwords do not match."));
+      .send(views.setupPage("Passwords do not match.", req.csrfToken()));
   }
   auth.setAdminPassword(password);
   res.redirect(302, "/login");
@@ -65,7 +72,7 @@ app.post("/setup", (req, res) => {
 
 app.get("/login", (req, res) => {
   if (!auth.hasAdmin()) return res.redirect(302, "/setup");
-  res.type("html").send(views.loginPage());
+  res.type("html").send(views.loginPage(null, req.csrfToken()));
 });
 
 app.post("/login", (req, res) => {
@@ -79,6 +86,7 @@ app.post("/login", (req, res) => {
       .send(
         views.loginPage(
           `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+          req.csrfToken(),
         ),
       );
   }
@@ -87,7 +95,7 @@ app.post("/login", (req, res) => {
     return res
       .status(401)
       .type("html")
-      .send(views.loginPage("Incorrect password."));
+      .send(views.loginPage("Incorrect password.", req.csrfToken()));
   }
   loginThrottle.recordSuccess(req.ip);
   const token = auth.createSession();
@@ -106,7 +114,7 @@ app.post("/logout", auth.requireAuth, (req, res) => {
 });
 
 app.get("/recover", (req, res) => {
-  res.type("html").send(views.recoverPage());
+  res.type("html").send(views.recoverPage(null, false, req.csrfToken()));
 });
 
 app.post("/recover/generate", (req, res) => {
@@ -118,11 +126,13 @@ app.post("/recover/generate", (req, res) => {
       .send(
         views.recoverPage(
           "A code was already generated in the last 10 minutes -- check this container's log, or wait before generating a new one.",
+          false,
+          req.csrfToken(),
         ),
       );
   }
   auth.logRecoveryCode(code);
-  res.type("html").send(views.recoverPage(null, true));
+  res.type("html").send(views.recoverPage(null, true, req.csrfToken()));
 });
 
 app.post("/recover", (req, res) => {
@@ -131,96 +141,126 @@ app.post("/recover", (req, res) => {
     return res
       .status(400)
       .type("html")
-      .send(views.recoverPage("Recovery code is required."));
+      .send(
+        views.recoverPage("Recovery code is required.", false, req.csrfToken()),
+      );
   }
   if (!password || password.length < 8) {
     return res
       .status(400)
       .type("html")
-      .send(views.recoverPage("Password must be at least 8 characters."));
+      .send(
+        views.recoverPage(
+          "Password must be at least 8 characters.",
+          false,
+          req.csrfToken(),
+        ),
+      );
   }
   if (password !== confirm) {
     return res
       .status(400)
       .type("html")
-      .send(views.recoverPage("Passwords do not match."));
+      .send(
+        views.recoverPage("Passwords do not match.", false, req.csrfToken()),
+      );
   }
   if (!auth.consumeRecoveryCode(code, password)) {
     return res
       .status(400)
       .type("html")
-      .send(views.recoverPage("Invalid or expired recovery code."));
+      .send(
+        views.recoverPage(
+          "Invalid or expired recovery code.",
+          false,
+          req.csrfToken(),
+        ),
+      );
   }
   res.redirect(302, "/login");
 });
 
 // Renders vault status and linked services //
-async function renderDashboard(res, error) {
+async function renderDashboard(req, res, error) {
   try {
     const statusResp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
       verb: agentClient.VERB_STATUS,
     });
     if (!statusResp.ok) {
-      return res
-        .type("html")
-        .send(
-          views.dashboardPage({ vaults: [], error: error || statusResp.error }),
-        );
+      return res.type("html").send(
+        views.dashboardPage({
+          vaults: [],
+          error: error || statusResp.error,
+          csrfToken: req.csrfToken(),
+        }),
+      );
     }
     const vaults = (statusResp.vaults || []).map((v) => ({
       ...v,
       services: state.getVaultServices(v.vault_id),
     }));
-    res.type("html").send(views.dashboardPage({ vaults, error }));
+    res
+      .type("html")
+      .send(views.dashboardPage({ vaults, error, csrfToken: req.csrfToken() }));
   } catch (err) {
     res.type("html").send(
       views.dashboardPage({
         vaults: [],
         error: `Could not reach agent: ${err.message}`,
+        csrfToken: req.csrfToken(),
       }),
     );
   }
 }
 
 // Render disk space left //
-async function renderNewVault(res, error) {
+async function renderNewVault(req, res, error) {
   try {
     const spaceResp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
       verb: agentClient.VERB_SPACE,
     });
     const availableMB = spaceResp.ok ? spaceResp.available_mb : null;
-    res.type("html").send(views.newVaultPage({ error, availableMB }));
+    res
+      .type("html")
+      .send(
+        views.newVaultPage({ error, availableMB, csrfToken: req.csrfToken() }),
+      );
   } catch (err) {
     res.type("html").send(
       views.newVaultPage({
         error: error || `Could not reach agent: ${err.message}`,
+        csrfToken: req.csrfToken(),
       }),
     );
   }
 }
 
 app.get("/dashboard", auth.requireAuth, (req, res) => {
-  renderDashboard(res);
+  renderDashboard(req, res);
 });
 
 app.get("/vaults/new", auth.requireAuth, (req, res) => {
-  renderNewVault(res);
+  renderNewVault(req, res);
 });
 
 app.post("/vaults", auth.requireAuth, async (req, res) => {
   const { vault_id, size_mb, passphrase, confirm } = req.body;
   if (!VAULT_ID_PATTERN.test(vault_id || "")) {
-    return renderNewVault(res, "Invalid vault ID.");
+    return renderNewVault(req, res, "Invalid vault ID.");
   }
   const sizeMB = parseInt(size_mb, 10);
   if (!Number.isInteger(sizeMB) || sizeMB < 32) {
-    return renderNewVault(res, "Size must be at least 32 MB.");
+    return renderNewVault(req, res, "Size must be at least 32 MB.");
   }
   if (!passphrase || passphrase.length < 8) {
-    return renderNewVault(res, "Passphrase must be at least 8 characters.");
+    return renderNewVault(
+      req,
+      res,
+      "Passphrase must be at least 8 characters.",
+    );
   }
   if (passphrase !== confirm) {
-    return renderNewVault(res, "Passphrases do not match.");
+    return renderNewVault(req, res, "Passphrases do not match.");
   }
   try {
     const spaceResp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
@@ -228,6 +268,7 @@ app.post("/vaults", auth.requireAuth, async (req, res) => {
     });
     if (spaceResp.ok && sizeMB > spaceResp.available_mb) {
       return renderNewVault(
+        req,
         res,
         `Size exceeds available space (${spaceResp.available_mb} MB free).`,
       );
@@ -238,20 +279,20 @@ app.post("/vaults", auth.requireAuth, async (req, res) => {
       size_mb: sizeMB,
       passphrase: Buffer.from(passphrase, "utf8"),
     });
-    if (!resp.ok) return renderNewVault(res, resp.error);
+    if (!resp.ok) return renderNewVault(req, res, resp.error);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderNewVault(res, `Could not reach agent: ${err.message}`);
+    renderNewVault(req, res, `Could not reach agent: ${err.message}`);
   }
 });
 
 app.post("/vaults/:id/unseal", auth.requireAuth, async (req, res) => {
   const vaultId = req.params.id;
   if (!VAULT_ID_PATTERN.test(vaultId)) {
-    return renderDashboard(res, "Invalid vault ID.");
+    return renderDashboard(req, res, "Invalid vault ID.");
   }
   if (!req.body.passphrase) {
-    return renderDashboard(res, "Passphrase is required.");
+    return renderDashboard(req, res, "Passphrase is required.");
   }
   try {
     const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
@@ -260,17 +301,17 @@ app.post("/vaults/:id/unseal", auth.requireAuth, async (req, res) => {
       passphrase: Buffer.from(req.body.passphrase, "utf8"),
       services: state.getVaultServices(vaultId),
     });
-    if (!resp.ok) return renderDashboard(res, resp.error);
+    if (!resp.ok) return renderDashboard(req, res, resp.error);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderDashboard(res, `Could not reach agent: ${err.message}`);
+    renderDashboard(req, res, `Could not reach agent: ${err.message}`);
   }
 });
 
 app.post("/vaults/:id/seal", auth.requireAuth, async (req, res) => {
   const vaultId = req.params.id;
   if (!VAULT_ID_PATTERN.test(vaultId)) {
-    return renderDashboard(res, "Invalid vault ID.");
+    return renderDashboard(req, res, "Invalid vault ID.");
   }
   try {
     const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
@@ -278,14 +319,14 @@ app.post("/vaults/:id/seal", auth.requireAuth, async (req, res) => {
       vault_id: vaultId,
       services: state.getVaultServices(vaultId),
     });
-    if (!resp.ok) return renderDashboard(res, resp.error);
+    if (!resp.ok) return renderDashboard(req, res, resp.error);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderDashboard(res, `Could not reach agent: ${err.message}`);
+    renderDashboard(req, res, `Could not reach agent: ${err.message}`);
   }
 });
 
-async function renderSettings(res, vaultId, { error, saved } = {}) {
+async function renderSettings(req, res, vaultId, { error, saved } = {}) {
   try {
     const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
       verb: agentClient.VERB_SERVICES,
@@ -297,6 +338,7 @@ async function renderSettings(res, vaultId, { error, saved } = {}) {
           availableServices: [],
           linkedServices: state.getVaultServices(vaultId),
           error: error || resp.error,
+          csrfToken: req.csrfToken(),
         }),
       );
     }
@@ -307,6 +349,7 @@ async function renderSettings(res, vaultId, { error, saved } = {}) {
         linkedServices: state.getVaultServices(vaultId),
         error,
         saved,
+        csrfToken: req.csrfToken(),
       }),
     );
   } catch (err) {
@@ -316,6 +359,7 @@ async function renderSettings(res, vaultId, { error, saved } = {}) {
         availableServices: [],
         linkedServices: state.getVaultServices(vaultId),
         error: `Could not reach agent: ${err.message}`,
+        csrfToken: req.csrfToken(),
       }),
     );
   }
@@ -326,7 +370,7 @@ app.get("/vaults/:id/settings", auth.requireAuth, (req, res) => {
   if (!VAULT_ID_PATTERN.test(vaultId)) {
     return res.status(404).type("html").send(views.notFoundPage());
   }
-  renderSettings(res, vaultId);
+  renderSettings(req, res, vaultId);
 });
 
 app.post("/vaults/:id/settings", auth.requireAuth, async (req, res) => {
@@ -342,14 +386,15 @@ app.post("/vaults/:id/settings", auth.requireAuth, async (req, res) => {
     const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
       verb: agentClient.VERB_SERVICES,
     });
-    if (!resp.ok) return renderSettings(res, vaultId, { error: resp.error });
+    if (!resp.ok)
+      return renderSettings(req, res, vaultId, { error: resp.error });
     // Defense in depth only -- agent independently re-validates every service name regardless.
     const known = new Set(resp.services || []);
     const services = requested.filter((s) => known.has(s));
     state.setVaultServices(vaultId, services);
-    renderSettings(res, vaultId, { saved: true });
+    renderSettings(req, res, vaultId, { saved: true });
   } catch (err) {
-    renderSettings(res, vaultId, {
+    renderSettings(req, res, vaultId, {
       error: `Could not reach agent: ${err.message}`,
     });
   }
@@ -362,26 +407,37 @@ app.post("/vaults/:id/destroy", auth.requireAuth, async (req, res) => {
   }
   const { confirm_id, admin_password } = req.body;
   if (confirm_id !== vaultId) {
-    return renderSettings(res, vaultId, {
+    return renderSettings(req, res, vaultId, {
       error: "Retyped vault ID does not match.",
     });
   }
   if (!auth.checkAdminPassword(admin_password || "")) {
-    return renderSettings(res, vaultId, { error: "Incorrect admin password." });
+    return renderSettings(req, res, vaultId, {
+      error: "Incorrect admin password.",
+    });
   }
   try {
     const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
       verb: agentClient.VERB_DESTROY,
       vault_id: vaultId,
     });
-    if (!resp.ok) return renderSettings(res, vaultId, { error: resp.error });
+    if (!resp.ok)
+      return renderSettings(req, res, vaultId, { error: resp.error });
     state.deleteVaultServices(vaultId);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderSettings(res, vaultId, {
+    renderSettings(req, res, vaultId, {
       error: `Could not reach agent: ${err.message}`,
     });
   }
+});
+
+// CSRF token missing/invalid: report clearly instead of the default error page //
+app.use((err, req, res, next) => {
+  if (err && err.code === "EBADCSRFTOKEN") {
+    return res.status(403).type("html").send(views.forbiddenPage());
+  }
+  next(err);
 });
 
 app.listen(PORT, () => {
