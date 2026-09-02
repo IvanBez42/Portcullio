@@ -97,4 +97,4 @@ _Per Service encryption:_ Create a locker for each service you want to encrypt, 
 
 ## License:
 
-Portcullio is licensed under the [GNU General Public License v3.0](LICENSE).
+Portcullio is licensed under the [GNU Affero General Public License v3.0](LICENSE).
