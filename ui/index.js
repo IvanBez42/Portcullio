@@ -2,6 +2,7 @@
 
 const path = require("path");
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const cookieParser = require("cookie-parser");
 const auth = require("./auth");
 const state = require("./state");
@@ -18,6 +19,14 @@ const AGENT_SOCKET_PATH = "/socket/agent.sock";
 const VAULT_ID_PATTERN = /^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$/;
 
 const app = express();
+
+// Coarse per-IP cap on /login -- loginThrottle.js already locks out repeated bad passwords //
+const loginRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // prevent iframe //
 app.use((req, res, next) => {
@@ -70,12 +79,12 @@ app.post("/setup", (req, res) => {
   res.redirect(302, "/login");
 });
 
-app.get("/login", (req, res) => {
+app.get("/login", loginRateLimit, (req, res) => {
   if (!auth.hasAdmin()) return res.redirect(302, "/setup");
   res.type("html").send(views.loginPage(null, req.csrfToken()));
 });
 
-app.post("/login", (req, res) => {
+app.post("/login", loginRateLimit, (req, res) => {
   if (!auth.hasAdmin()) return res.redirect(302, "/setup");
   const lockedMs = loginThrottle.msUntilUnlocked(req.ip);
   if (lockedMs > 0) {
