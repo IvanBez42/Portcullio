@@ -20,6 +20,7 @@ function callAgent(socketPath, request, timeoutMs = DEFAULT_TIMEOUT_MS) {
     if (request.vault_id !== undefined) wireRequest.vault_id = request.vault_id;
     if (request.services !== undefined) wireRequest.services = request.services;
     if (request.size_mb !== undefined) wireRequest.size_mb = request.size_mb;
+    if (request.locker !== undefined) wireRequest.locker = request.locker;
     if (request.passphrase !== undefined) {
       if (!Buffer.isBuffer(request.passphrase)) {
         reject(

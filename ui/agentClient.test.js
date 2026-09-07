@@ -7,7 +7,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { callAgent, VERB_UNSEAL, VERB_STATUS } = require("./agentClient");
+const { callAgent, VERB_UNSEAL, VERB_STATUS, VERB_SPACE } = require("./agentClient");
 
 // Bare Unix-socket server speaking internal/socket's protocol //
 function startFakeAgent(handleRequest) {
@@ -77,6 +77,24 @@ test("callAgent omits passphrase/services/size_mb when not provided", async () =
     assert.equal("passphrase" in seen, false);
     assert.equal("services" in seen, false);
     assert.equal("size_mb" in seen, false);
+  } finally {
+    server.close();
+  }
+});
+
+// The locker field (scoping the space verb to one /lockers subdirectory) passes through //
+test("callAgent sends locker when provided, omits it otherwise", async () => {
+  let seen;
+  const { server, socketPath } = await startFakeAgent((req) => {
+    seen = req;
+    return { ok: true, available_mb: 1024 };
+  });
+  try {
+    await callAgent(socketPath, { verb: VERB_SPACE, locker: "movies" });
+    assert.equal(seen.locker, "movies");
+
+    await callAgent(socketPath, { verb: VERB_SPACE });
+    assert.equal("locker" in seen, false);
   } finally {
     server.close();
   }
