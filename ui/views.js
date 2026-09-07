@@ -1,5 +1,7 @@
 "use strict";
 
+const vaultIdLib = require("./vaultId");
+
 function escapeHtml(s) {
   return String(s).replace(
     /[&<>"']/g,
@@ -146,15 +148,16 @@ function forbiddenPage() {
 
 function vaultRow(vault, csrfToken) {
   const id = escapeHtml(vault.vault_id);
+  const urlPath = escapeHtml(vaultIdLib.urlPathFor(vault.vault_id));
   const state = escapeHtml(vault.state);
-  const gear = `<a class="gear-link" href="/vaults/${id}/settings" title="Settings" aria-label="${id} settings">${gearIcon}</a>`;
+  const gear = `<a class="gear-link" href="/vaults/${urlPath}/settings" title="Settings" aria-label="${id} settings">${gearIcon}</a>`;
   const header = `<div class="vault-card-header"><h2 class="vault-id">${id}</h2>${gear}</div>`;
 
   let body;
   if (vault.state === "sealed") {
     body = `
       ${statusBadge(vault.state)}
-      <form method="post" action="/vaults/${id}/unseal" class="unlock-form">
+      <form method="post" action="/vaults/${urlPath}/unseal" class="unlock-form">
         ${csrfField(csrfToken)}
         <input type="password" name="passphrase" placeholder="Passphrase" required>
         <button type="submit">Unlock</button>
@@ -164,7 +167,7 @@ function vaultRow(vault, csrfToken) {
       ${statusBadge(vault.state)}
       ${usageDetail(vault.used_mb, vault.total_mb)}
       ${serviceChips(vault.services)}
-      <form method="post" action="/vaults/${id}/seal" class="lock-form">
+      <form method="post" action="/vaults/${urlPath}/seal" class="lock-form">
         ${csrfField(csrfToken)}
         <button type="submit">Lock</button>
       </form>`;
@@ -192,7 +195,7 @@ function usageDetail(usedMB, totalMB) {
     <p class="vault-detail">${formatMB(usedMB || 0)} of ${formatMB(totalMB)} used</p>`;
 }
 
-// Range slides with textbox //
+// Range slides with textbox -- max/hint re-synced by dashboard.js on locker change //
 function sizeControl(availableMB) {
   const known = typeof availableMB === "number" && availableMB > 0;
   const max = known ? availableMB : 1048576; // 1 TB fallback, unconstrained in practice
@@ -206,7 +209,22 @@ function sizeControl(availableMB) {
       <input type="range" id="size_mb_slider" min="32" max="${max}" value="${value}" step="1">
       <input type="number" id="size_mb" name="size_mb" min="32" max="${max}" value="${value}" required>
     </div>
-    <p class="vault-detail">${hint}</p>`;
+    <p class="vault-detail" id="space-hint">${hint}</p>`;
+}
+
+// Which locker the new vault goes in -- "" is root /lockers, always offered first //
+function lockerControl(availableMB, lockers) {
+  const known = typeof availableMB === "number" && availableMB > 0;
+  const rootHint = known ? ` -- ${formatMB(availableMB)} free` : "";
+  const rootOption = `<option value="" data-available="${known ? availableMB : ""}">/lockers${rootHint}</option>`;
+  const lockerOptions = (lockers || [])
+    .map((l) => {
+      const name = escapeHtml(l.name);
+      return `<option value="${name}" data-available="${l.available_mb}">/lockers/${name} -- ${formatMB(l.available_mb)} free</option>`;
+    })
+    .join("");
+  return `
+    <label for="locker">Locker <select id="locker" name="locker">${rootOption}${lockerOptions}</select></label>`;
 }
 
 function dashboardPage({ vaults, error, csrfToken }) {
@@ -233,7 +251,7 @@ function dashboardPage({ vaults, error, csrfToken }) {
 }
 
 // New vault page //
-function newVaultPage({ error, availableMB, csrfToken }) {
+function newVaultPage({ error, availableMB, lockers, csrfToken }) {
   return layout(
     "Portcullio - new vault",
     `
@@ -244,7 +262,8 @@ function newVaultPage({ error, availableMB, csrfToken }) {
     ${error ? `<p class="error-text">${escapeHtml(error)}</p>` : ""}
     <form method="post" action="/vaults" class="new-vault-form">
       ${csrfField(csrfToken)}
-      <label>Vault ID <input type="text" name="vault_id" pattern="[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}" required></label>
+      ${lockerControl(availableMB, lockers)}
+      <label>Vault ID <input type="text" name="vault_id" pattern="${vaultIdLib.SEGMENT_SOURCE}" required></label>
       ${sizeControl(availableMB)}
       <label>Passphrase <input type="password" name="passphrase" required minlength="8"></label>
       <label>Confirm <input type="password" name="confirm" required minlength="8"></label>
@@ -265,6 +284,7 @@ function settingsPage({
   csrfToken,
 }) {
   const id = escapeHtml(vaultId);
+  const urlPath = escapeHtml(vaultIdLib.urlPathFor(vaultId));
   const linkedSet = new Set(linkedServices);
   const checkboxes = availableServices.length
     ? availableServices
@@ -287,7 +307,7 @@ function settingsPage({
     ${saved ? `<p class="success-text">Saved.</p>` : ""}
 
     <h2>Linked services</h2>
-    <form method="post" action="/vaults/${id}/settings" class="settings-form">
+    <form method="post" action="/vaults/${urlPath}/settings" class="settings-form">
       ${csrfField(csrfToken)}
       ${checkboxes}
       <button type="submit">Save</button>
@@ -295,7 +315,7 @@ function settingsPage({
 
     <h2 class="danger-heading">Delete this vault</h2>
     <p>Permanently deletes the vault's backing file. Cannot be undone.</p>
-    <form method="post" action="/vaults/${id}/destroy" class="settings-form">
+    <form method="post" action="/vaults/${urlPath}/destroy" class="settings-form">
       ${csrfField(csrfToken)}
       <label>Retype vault ID to confirm <input type="text" name="confirm_id" required></label>
       <label>Admin password <input type="password" name="admin_password" required></label>

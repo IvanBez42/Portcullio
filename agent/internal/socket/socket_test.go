@@ -93,10 +93,15 @@ func newHandlerConfig(t *testing.T) socket.HandlerConfig {
 	}
 }
 
+// Mirrors AgentHandler.mapperName's "/" -> "--" sanitization //
+func mapperNameFor(vaultID string) string {
+	return "portcullio-" + strings.ReplaceAll(vaultID, "/", "--")
+}
+
 // Tears down real system state left behind by a test vault //
 func vaultCleanup(t *testing.T, cfg socket.HandlerConfig, vaultID string) {
 	t.Helper()
-	mapperName := "portcullio-" + vaultID
+	mapperName := mapperNameFor(vaultID)
 	imagePath := filepath.Join(cfg.InputDir, vaultID+".img")
 	mountPath := filepath.Join(cfg.MountAreaDir, vaultID)
 	t.Cleanup(func() {
@@ -434,7 +439,7 @@ func provisionVaultForHandler(t *testing.T, cfg socket.HandlerConfig, vaultID st
 
 	vaultCleanup(t, cfg, vaultID)
 	imagePath := filepath.Join(cfg.InputDir, vaultID+".img")
-	mapperName := "portcullio-" + vaultID
+	mapperName := mapperNameFor(vaultID)
 	if err := provision.CreateVault(provision.CreateVaultParams{
 		ImagePath:  imagePath,
 		SizeMB:     64,
@@ -450,7 +455,7 @@ func provisionVaultForHandler(t *testing.T, cfg socket.HandlerConfig, vaultID st
 func makeDegradedMapperOpenNothingMounted(t *testing.T, cfg socket.HandlerConfig, vaultID string) {
 	t.Helper()
 	imagePath := filepath.Join(cfg.InputDir, vaultID+".img")
-	mapperName := "portcullio-" + vaultID
+	mapperName := mapperNameFor(vaultID)
 	mountPath := filepath.Join(cfg.MountAreaDir, vaultID)
 
 	loopPath, err := luks.AttachLoop(imagePath)
@@ -469,7 +474,7 @@ func makeDegradedMapperOpenNothingMounted(t *testing.T, cfg socket.HandlerConfig
 func makeDegradedUnrecognizedMount(t *testing.T, cfg socket.HandlerConfig, vaultID string) *loopback.Device {
 	t.Helper()
 	imagePath := filepath.Join(cfg.InputDir, vaultID+".img")
-	mapperName := "portcullio-" + vaultID
+	mapperName := mapperNameFor(vaultID)
 	mountPath := filepath.Join(cfg.MountAreaDir, vaultID)
 
 	loopPath, err := luks.AttachLoop(imagePath)
@@ -597,5 +602,168 @@ func TestStatusAllOnEmptyInputDirReturnsNoVaults(t *testing.T) {
 	}
 	if len(resp.Vaults) != 0 {
 		t.Fatalf("status (all) on empty input dir = %+v, want none", resp.Vaults)
+	}
+}
+
+// Full create -> status -> unseal -> seal -> destroy round trip in a not-yet-existing locker //
+func TestFullLifecycleOverSocketInLocker(t *testing.T) {
+	loopback.RequireRoot(t)
+	loopback.RequireBinaries(t)
+	requireBinaries(t, "mount", "umount", "mkfs.ext4", "chattr")
+
+	cfg := newHandlerConfig(t)
+	const vaultID = "movies/lifecycle-vault"
+	vaultCleanup(t, cfg, vaultID)
+
+	lockerDir := filepath.Join(cfg.InputDir, "movies")
+	if _, err := os.Stat(lockerDir); !os.IsNotExist(err) {
+		t.Fatalf("locker dir %s already exists before create", lockerDir)
+	}
+
+	handler := socket.NewAgentHandler(cfg)
+	sockPath := startServer(t, handler)
+
+	createResp := call(t, sockPath, socket.Request{
+		Verb: socket.VerbCreate, VaultID: vaultID,
+		Passphrase: []byte(testPassphrase), SizeMB: 64,
+	})
+	if !createResp.OK {
+		t.Fatalf("create: %s", createResp.Error)
+	}
+	if _, err := os.Stat(lockerDir); err != nil {
+		t.Fatalf("locker dir %s not created by create: %v", lockerDir, err)
+	}
+
+	statusResp := call(t, sockPath, socket.Request{Verb: socket.VerbStatus})
+	if !statusResp.OK || len(statusResp.Vaults) != 1 || statusResp.Vaults[0].VaultID != vaultID {
+		t.Fatalf("status (all) = %+v (err %q), want exactly one %q", statusResp.Vaults, statusResp.Error, vaultID)
+	}
+
+	unsealResp := call(t, sockPath, socket.Request{
+		Verb: socket.VerbUnseal, VaultID: vaultID, Passphrase: []byte(testPassphrase),
+	})
+	if !unsealResp.OK || unsealResp.State != "unsealed" {
+		t.Fatalf("unseal = %+v, want unsealed", unsealResp)
+	}
+	mountPath := filepath.Join(cfg.MountAreaDir, "movies", "lifecycle-vault")
+	if mounted, err := mount.IsMounted(mountPath); err != nil || !mounted {
+		t.Fatalf("IsMounted(%s) = %v, %v, want mounted", mountPath, mounted, err)
+	}
+
+	sealResp := call(t, sockPath, socket.Request{Verb: socket.VerbSeal, VaultID: vaultID})
+	if !sealResp.OK || sealResp.State != "sealed" {
+		t.Fatalf("seal = %+v, want sealed", sealResp)
+	}
+
+	destroyResp := call(t, sockPath, socket.Request{Verb: socket.VerbDestroy, VaultID: vaultID})
+	if !destroyResp.OK {
+		t.Fatalf("destroy: %s", destroyResp.Error)
+	}
+	if _, err := os.Stat(mountPath); !os.IsNotExist(err) {
+		t.Fatalf("mount stub %s should be gone after destroy, stat err = %v", mountPath, err)
+	}
+}
+
+// Checks status refuses vault_ids that are malformed or nested too deeply //
+func TestStatusRefusesMalformedOrDeeplyNestedVaultID(t *testing.T) {
+	cfg := newHandlerConfig(t)
+	handler := socket.NewAgentHandler(cfg)
+	sockPath := startServer(t, handler)
+
+	for _, id := range []string{"a/b/c", "movies/", "/plex", "movies//plex", "movies/../plex", "../etc/passwd"} {
+		resp := call(t, sockPath, socket.Request{Verb: socket.VerbStatus, VaultID: id})
+		if resp.OK {
+			t.Fatalf("status(%q) succeeded, want refusal", id)
+		}
+	}
+}
+
+// Checks a valid locker-scoped vault_id fails on not-found, not format //
+func TestStatusAcceptsLockerScopedVaultIDFormat(t *testing.T) {
+	cfg := newHandlerConfig(t)
+	handler := socket.NewAgentHandler(cfg)
+	sockPath := startServer(t, handler)
+
+	resp := call(t, sockPath, socket.Request{Verb: socket.VerbStatus, VaultID: "movies/never-created"})
+	if resp.OK {
+		t.Fatalf("status of a never-created locker-scoped vault_id succeeded, want refusal")
+	}
+	if strings.Contains(resp.Error, "invalid vault_id") {
+		t.Fatalf("status error = %q, want it to fail on not-found rather than format validation", resp.Error)
+	}
+	if !strings.Contains(resp.Error, "not found") {
+		t.Fatalf("status error = %q, want a not-found error", resp.Error)
+	}
+}
+
+// Checks the space verb also lists every locker subdirectory with its own free space //
+func TestSpaceListsLockerSubdirectories(t *testing.T) {
+	cfg := newHandlerConfig(t)
+	for _, name := range []string{"movies", "backups"} {
+		if err := os.MkdirAll(filepath.Join(cfg.InputDir, name), 0o700); err != nil {
+			t.Fatalf("mkdir locker %s: %v", name, err)
+		}
+	}
+	// A loose file directly in InputDir must not be mistaken for a locker //
+	if err := os.WriteFile(filepath.Join(cfg.InputDir, "stray.img"), nil, 0o600); err != nil {
+		t.Fatalf("write stray file: %v", err)
+	}
+
+	handler := socket.NewAgentHandler(cfg)
+	sockPath := startServer(t, handler)
+
+	resp := call(t, sockPath, socket.Request{Verb: socket.VerbSpace})
+	if !resp.OK {
+		t.Fatalf("space: %s", resp.Error)
+	}
+	if resp.AvailableMB <= 0 {
+		t.Fatalf("AvailableMB = %d, want > 0", resp.AvailableMB)
+	}
+	if len(resp.Lockers) != 2 {
+		t.Fatalf("Lockers = %+v, want exactly 2 (movies, backups)", resp.Lockers)
+	}
+	seen := map[string]bool{}
+	for _, l := range resp.Lockers {
+		seen[l.Name] = true
+		if l.AvailableMB <= 0 {
+			t.Fatalf("locker %q AvailableMB = %d, want > 0", l.Name, l.AvailableMB)
+		}
+	}
+	if !seen["movies"] || !seen["backups"] {
+		t.Fatalf("Lockers = %+v, want movies and backups", resp.Lockers)
+	}
+}
+
+// Checks the space verb, scoped to one locker, reports just that locker's space //
+func TestSpaceWithLockerReturnsJustThatLockersSpace(t *testing.T) {
+	cfg := newHandlerConfig(t)
+	if err := os.MkdirAll(filepath.Join(cfg.InputDir, "movies"), 0o700); err != nil {
+		t.Fatalf("mkdir locker: %v", err)
+	}
+
+	handler := socket.NewAgentHandler(cfg)
+	sockPath := startServer(t, handler)
+
+	resp := call(t, sockPath, socket.Request{Verb: socket.VerbSpace, Locker: "movies"})
+	if !resp.OK {
+		t.Fatalf("space(locker=movies): %s", resp.Error)
+	}
+	if resp.AvailableMB <= 0 {
+		t.Fatalf("AvailableMB = %d, want > 0", resp.AvailableMB)
+	}
+	if len(resp.Lockers) != 0 {
+		t.Fatalf("Lockers = %+v, want none when a specific locker was requested", resp.Lockers)
+	}
+}
+
+// Checks the space verb refuses a malformed locker name //
+func TestSpaceRefusesInvalidLockerName(t *testing.T) {
+	cfg := newHandlerConfig(t)
+	handler := socket.NewAgentHandler(cfg)
+	sockPath := startServer(t, handler)
+
+	resp := call(t, sockPath, socket.Request{Verb: socket.VerbSpace, Locker: "../etc"})
+	if resp.OK {
+		t.Fatalf("space with a path-traversal locker succeeded, want refusal")
 	}
 }

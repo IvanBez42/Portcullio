@@ -15,11 +15,17 @@ import (
 	"github.com/IvanBez42/Portcullio/agent/internal/vault"
 )
 
-// Validated-identifier gate for every vault_id //
+// Validated-identifier gate for every vault_id: a bare name, or "<locker>/<name>" //
 var vaultIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$`)
+var lockerVaultIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}/[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$`)
 
 func validVaultID(id string) bool {
-	return vaultIDPattern.MatchString(id)
+	return vaultIDPattern.MatchString(id) || lockerVaultIDPattern.MatchString(id)
+}
+
+// Validated-identifier gate for a bare locker name (no "/") //
+func validLockerName(name string) bool {
+	return vaultIDPattern.MatchString(name)
 }
 
 // Returns an AgentHandler for cfg //
@@ -36,7 +42,8 @@ func (h *AgentHandler) mountPath(id string) string {
 }
 
 func (h *AgentHandler) mapperName(id string) string {
-	return "portcullio-" + id
+	// mapper names can't contain "/" -- swap it for "--" //
+	return "portcullio-" + strings.ReplaceAll(id, "/", "--")
 }
 
 func (h *AgentHandler) vaultExists(id string) (bool, error) {
@@ -50,7 +57,7 @@ func (h *AgentHandler) vaultExists(id string) (bool, error) {
 	return false, fmt.Errorf("socket: check vault %q exists: %w", id, err)
 }
 
-// Lists every vault_id found in InputDir //
+// Lists every vault_id found in InputDir, including one level into any locker subdirectory //
 func (h *AgentHandler) listVaultIDs() ([]string, error) {
 	entries, err := os.ReadDir(h.cfg.InputDir)
 	if err != nil {
@@ -59,6 +66,19 @@ func (h *AgentHandler) listVaultIDs() ([]string, error) {
 	var ids []string
 	for _, e := range entries {
 		if e.IsDir() {
+			// unreadable locker dir (e.g. unmounted drive) is skipped, not fatal //
+			lockerEntries, err := os.ReadDir(filepath.Join(h.cfg.InputDir, e.Name()))
+			if err != nil {
+				continue
+			}
+			for _, le := range lockerEntries {
+				if le.IsDir() {
+					continue
+				}
+				if ext := filepath.Ext(le.Name()); ext == ".img" {
+					ids = append(ids, e.Name()+"/"+strings.TrimSuffix(le.Name(), ext))
+				}
+			}
 			continue
 		}
 		if ext := filepath.Ext(e.Name()); ext == ".img" {
@@ -67,6 +87,22 @@ func (h *AgentHandler) listVaultIDs() ([]string, error) {
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+// Lists every locker (subdirectory of InputDir) //
+func (h *AgentHandler) listLockers() ([]string, error) {
+	entries, err := os.ReadDir(h.cfg.InputDir)
+	if err != nil {
+		return nil, fmt.Errorf("socket: list lockers in %s: %w", h.cfg.InputDir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // Returns the registered Vault for id, creating one on first reference //
@@ -310,7 +346,8 @@ func (h *AgentHandler) handleCreate(req Request) Response {
 		return errResp(fmt.Errorf("socket: vault %q already exists", req.VaultID))
 	}
 
-	if err := os.MkdirAll(h.cfg.InputDir, 0o700); err != nil {
+	// mkdir the image's parent dir, not just InputDir, so a new locker subdir works //
+	if err := os.MkdirAll(filepath.Dir(h.imagePath(req.VaultID)), 0o700); err != nil {
 		zeroBytes(req.Passphrase)
 		return errResp(fmt.Errorf("socket: create input dir: %w", err))
 	}
@@ -364,9 +401,34 @@ func (h *AgentHandler) handleServices(req Request) Response {
 
 // Handles the space verb //
 func (h *AgentHandler) handleSpace(req Request) Response {
+	if req.Locker != "" {
+		if !validLockerName(req.Locker) {
+			return errResp(fmt.Errorf("socket: invalid locker %q", req.Locker))
+		}
+		avail, err := provision.AvailableSpace(filepath.Join(h.cfg.InputDir, req.Locker))
+		if err != nil {
+			return errResp(fmt.Errorf("socket: available space: %w", err))
+		}
+		return Response{OK: true, AvailableMB: avail / (1024 * 1024)}
+	}
+
 	avail, err := provision.AvailableSpace(h.cfg.InputDir)
 	if err != nil {
 		return errResp(fmt.Errorf("socket: available space: %w", err))
 	}
-	return Response{OK: true, AvailableMB: avail / (1024 * 1024)}
+
+	names, err := h.listLockers()
+	if err != nil {
+		return errResp(err)
+	}
+	lockers := make([]LockerSpace, 0, len(names))
+	for _, name := range names {
+		lockerAvail, err := provision.AvailableSpace(filepath.Join(h.cfg.InputDir, name))
+		if err != nil {
+			continue // an unreadable/unmounted locker is omitted rather than failing the whole call //
+		}
+		lockers = append(lockers, LockerSpace{Name: name, AvailableMB: lockerAvail / (1024 * 1024)})
+	}
+
+	return Response{OK: true, AvailableMB: avail / (1024 * 1024), Lockers: lockers}
 }

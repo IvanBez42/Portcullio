@@ -10,13 +10,15 @@ const views = require("./views");
 const agentClient = require("./agentClient");
 const loginThrottle = require("./loginThrottle");
 const csrf = require("./csrf");
+const vaultIdLib = require("./vaultId");
 
 const PORT = process.env.PORT || 8080;
 
 // Fixed socket path //
 const AGENT_SOCKET_PATH = "/socket/agent.sock";
 
-const VAULT_ID_PATTERN = /^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$/;
+// Matches a single path segment: a bare vault name, or a locker name on its own //
+const VAULT_ID_PATTERN = vaultIdLib.SEGMENT_PATTERN;
 
 const app = express();
 
@@ -222,17 +224,23 @@ async function renderDashboard(req, res, error) {
   }
 }
 
-// Render disk space left //
+// Render disk space left, and every discovered locker (subdirectory of /lockers) //
 async function renderNewVault(req, res, error) {
   try {
     const spaceResp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
       verb: agentClient.VERB_SPACE,
     });
     const availableMB = spaceResp.ok ? spaceResp.available_mb : null;
+    const lockers = spaceResp.ok ? spaceResp.lockers || [] : [];
     res
       .type("html")
       .send(
-        views.newVaultPage({ error, availableMB, csrfToken: req.csrfToken() }),
+        views.newVaultPage({
+          error,
+          availableMB,
+          lockers,
+          csrfToken: req.csrfToken(),
+        }),
       );
   } catch (err) {
     res.type("html").send(
@@ -253,10 +261,14 @@ app.get("/vaults/new", auth.requireAuth, (req, res) => {
 });
 
 app.post("/vaults", auth.requireAuth, async (req, res) => {
-  const { vault_id, size_mb, passphrase, confirm } = req.body;
+  const { vault_id, locker, size_mb, passphrase, confirm } = req.body;
   if (!VAULT_ID_PATTERN.test(vault_id || "")) {
     return renderNewVault(req, res, "Invalid vault ID.");
   }
+  if (locker && !VAULT_ID_PATTERN.test(locker)) {
+    return renderNewVault(req, res, "Invalid locker.");
+  }
+  const fullVaultId = vaultIdLib.joinVaultId(locker || "", vault_id);
   const sizeMB = parseInt(size_mb, 10);
   if (!Number.isInteger(sizeMB) || sizeMB < 32) {
     return renderNewVault(req, res, "Size must be at least 32 MB.");
@@ -274,6 +286,7 @@ app.post("/vaults", auth.requireAuth, async (req, res) => {
   try {
     const spaceResp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
       verb: agentClient.VERB_SPACE,
+      locker: locker || undefined,
     });
     if (spaceResp.ok && sizeMB > spaceResp.available_mb) {
       return renderNewVault(
@@ -284,7 +297,7 @@ app.post("/vaults", auth.requireAuth, async (req, res) => {
     }
     const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
       verb: agentClient.VERB_CREATE,
-      vault_id,
+      vault_id: fullVaultId,
       size_mb: sizeMB,
       passphrase: Buffer.from(passphrase, "utf8"),
     });
@@ -295,9 +308,9 @@ app.post("/vaults", auth.requireAuth, async (req, res) => {
   }
 });
 
-app.post("/vaults/:id/unseal", auth.requireAuth, async (req, res) => {
-  const vaultId = req.params.id;
-  if (!VAULT_ID_PATTERN.test(vaultId)) {
+app.post("/vaults/:locker/:name/unseal", auth.requireAuth, async (req, res) => {
+  const vaultId = vaultIdLib.parseUrlSegments(req.params.locker, req.params.name);
+  if (vaultId === null) {
     return renderDashboard(req, res, "Invalid vault ID.");
   }
   if (!req.body.passphrase) {
@@ -317,9 +330,9 @@ app.post("/vaults/:id/unseal", auth.requireAuth, async (req, res) => {
   }
 });
 
-app.post("/vaults/:id/seal", auth.requireAuth, async (req, res) => {
-  const vaultId = req.params.id;
-  if (!VAULT_ID_PATTERN.test(vaultId)) {
+app.post("/vaults/:locker/:name/seal", auth.requireAuth, async (req, res) => {
+  const vaultId = vaultIdLib.parseUrlSegments(req.params.locker, req.params.name);
+  if (vaultId === null) {
     return renderDashboard(req, res, "Invalid vault ID.");
   }
   try {
@@ -374,17 +387,17 @@ async function renderSettings(req, res, vaultId, { error, saved } = {}) {
   }
 }
 
-app.get("/vaults/:id/settings", auth.requireAuth, (req, res) => {
-  const vaultId = req.params.id;
-  if (!VAULT_ID_PATTERN.test(vaultId)) {
+app.get("/vaults/:locker/:name/settings", auth.requireAuth, (req, res) => {
+  const vaultId = vaultIdLib.parseUrlSegments(req.params.locker, req.params.name);
+  if (vaultId === null) {
     return res.status(404).type("html").send(views.notFoundPage());
   }
   renderSettings(req, res, vaultId);
 });
 
-app.post("/vaults/:id/settings", auth.requireAuth, async (req, res) => {
-  const vaultId = req.params.id;
-  if (!VAULT_ID_PATTERN.test(vaultId)) {
+app.post("/vaults/:locker/:name/settings", auth.requireAuth, async (req, res) => {
+  const vaultId = vaultIdLib.parseUrlSegments(req.params.locker, req.params.name);
+  if (vaultId === null) {
     return res.status(404).type("html").send(views.notFoundPage());
   }
 
@@ -409,9 +422,9 @@ app.post("/vaults/:id/settings", auth.requireAuth, async (req, res) => {
   }
 });
 
-app.post("/vaults/:id/destroy", auth.requireAuth, async (req, res) => {
-  const vaultId = req.params.id;
-  if (!VAULT_ID_PATTERN.test(vaultId)) {
+app.post("/vaults/:locker/:name/destroy", auth.requireAuth, async (req, res) => {
+  const vaultId = vaultIdLib.parseUrlSegments(req.params.locker, req.params.name);
+  if (vaultId === null) {
     return res.status(404).type("html").send(views.notFoundPage());
   }
   const { confirm_id, admin_password } = req.body;

@@ -15,6 +15,13 @@ type Request struct {
 	Passphrase []byte   `json:"passphrase,omitempty"`
 	Services   []string `json:"services,omitempty"`
 	SizeMB     int      `json:"size_mb,omitempty"`
+	Locker     string   `json:"locker,omitempty"` // scopes the space verb to one subdirectory of InputDir
+}
+
+// One locker's entry in a space Response: a subdirectory of InputDir, e.g. a separately mounted disk //
+type LockerSpace struct {
+	Name        string `json:"name"`
+	AvailableMB int64  `json:"available_mb"`
 }
 
 // One vault's entry in a status Response //
@@ -34,6 +41,7 @@ type Response struct {
 	Vaults      []VaultStatus `json:"vaults,omitempty"`
 	Services    []string      `json:"services,omitempty"`
 	AvailableMB int64         `json:"available_mb,omitempty"`
+	Lockers     []LockerSpace `json:"lockers,omitempty"`
 }
 
 // Listens on a Unix socket, dispatches to an AgentHandler //
