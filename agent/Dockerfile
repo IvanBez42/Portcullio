@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         cryptsetup \
         util-linux \
         e2fsprogs \
+        xfsprogs \
         kmod \
     && apt-get purge -y --auto-remove curl gnupg \
     && rm -rf /var/lib/apt/lists/*
