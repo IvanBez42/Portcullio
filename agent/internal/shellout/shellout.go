@@ -14,7 +14,7 @@ import (
 var ErrNeedsPrivilege = errors.New("shellout: operation requires root or CAP_SYS_ADMIN")
 
 // Bounds every command run through Run //
-const DefaultTimeout = 15 * time.Second
+const DefaultTimeout = 60 * time.Second
 
 // Runs name with args, feeding stdin, bounded by DefaultTimeout //
 func Run(stdin []byte, name string, args ...string) (string, error) {
