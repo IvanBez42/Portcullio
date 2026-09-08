@@ -163,7 +163,13 @@ func format(loopPath string, passphrase []byte) error {
 
 // Formats mapperPath with fstype //
 func mkfs(mapperPath, fstype string) error {
-	if _, err := shellout.Run(nil, "mkfs."+fstype, "-q", "-F", mapperPath); err != nil {
+	args := []string{"-q", "-F"}
+	if fstype == "ext4" {
+		// Defers inode table/journal zeroing to a background kthread so mkfs returns fast on real disks //
+		args = append(args, "-E", "nodiscard,lazy_itable_init=1,lazy_journal_init=1")
+	}
+	args = append(args, mapperPath)
+	if _, err := shellout.Run(nil, "mkfs."+fstype, args...); err != nil {
 		return fmt.Errorf("provision: mkfs.%s %s: %w", fstype, mapperPath, err)
 	}
 	return nil
