@@ -42,10 +42,14 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
 app.use(csrf.doubleCsrfProtection);
 
+// Whether the request's cookie is still a live session //
+function hasValidSession(req) {
+  return auth.isValidSession(req.cookies[auth.SESSION_COOKIE]);
+}
+
 app.get("/", (req, res) => {
   if (!auth.hasAdmin()) return res.redirect(302, "/setup");
-  const token = req.cookies[auth.SESSION_COOKIE];
-  if (auth.isValidSession(token)) return res.redirect(302, "/dashboard");
+  if (hasValidSession(req)) return res.redirect(302, "/dashboard");
   return res.redirect(302, "/login");
 });
 
@@ -83,11 +87,13 @@ app.post("/setup", (req, res) => {
 
 app.get("/login", loginRateLimit, (req, res) => {
   if (!auth.hasAdmin()) return res.redirect(302, "/setup");
+  if (hasValidSession(req)) return res.redirect(302, "/dashboard");
   res.type("html").send(views.loginPage(null, req.csrfToken()));
 });
 
 app.post("/login", loginRateLimit, (req, res) => {
   if (!auth.hasAdmin()) return res.redirect(302, "/setup");
+  if (hasValidSession(req)) return res.redirect(302, "/dashboard");
   const lockedMs = loginThrottle.msUntilUnlocked(req.ip);
   if (lockedMs > 0) {
     const minutes = Math.ceil(lockedMs / 60000);
