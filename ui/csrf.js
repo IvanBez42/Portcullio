@@ -25,7 +25,7 @@ const { doubleCsrfProtection, invalidCsrfTokenError } = doubleCsrf({
   cookieOptions: {
     sameSite: "strict",
     path: "/",
-    secure: false,
+    secure: process.env.PORTCULLIO_COOKIE_SECURE === "true",
     httpOnly: true,
   },
   getCsrfTokenFromRequest: (req) => req.body && req.body._csrf,
