@@ -1,6 +1,6 @@
 "use strict";
 
-const crypto = require("crypto");
+const crypto = require("node:crypto");
 const { doubleCsrf } = require("csrf-csrf");
 const state = require("./state");
 const auth = require("./auth");
@@ -20,7 +20,7 @@ const CSRF_SECRET = getOrCreateSecret();
 const { doubleCsrfProtection, invalidCsrfTokenError } = doubleCsrf({
   getSecret: () => CSRF_SECRET,
   getSessionIdentifier: (req) =>
-    (req.cookies && req.cookies[auth.SESSION_COOKIE]) || "anonymous",
+    req.cookies?.[auth.SESSION_COOKIE] || "anonymous",
   cookieName: "portcullio_csrf",
   cookieOptions: {
     sameSite: "strict",
@@ -28,7 +28,7 @@ const { doubleCsrfProtection, invalidCsrfTokenError } = doubleCsrf({
     secure: false,
     httpOnly: true,
   },
-  getCsrfTokenFromRequest: (req) => req.body && req.body._csrf,
+  getCsrfTokenFromRequest: (req) => req.body?._csrf,
 });
 
 module.exports = { doubleCsrfProtection, invalidCsrfTokenError };

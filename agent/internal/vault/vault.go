@@ -150,24 +150,25 @@ func (v *Vault) Unseal(passphrase []byte) error {
 	if err != nil {
 		return v.rollbackToSealed(loopPath, fmt.Errorf("vault: unseal %s: %w", cfg.ImagePath, err))
 	}
+	if mountedOK && source == mapperPath {
+		return nil // already mounted correctly //
+	}
 
-	if !(mountedOK && source == mapperPath) {
-		if mountedOK {
-			holders, err := mount.CheckHandles(cfg.MountPath)
-			if err != nil {
-				return v.rollbackToSealed(loopPath, fmt.Errorf("vault: unseal %s: %w", cfg.ImagePath, err))
-			}
-			if len(holders) > 0 {
-				return v.rollbackToSealed(loopPath, fmt.Errorf(
-					"vault: refusing to unseal %s: %s still held by %v", cfg.ImagePath, cfg.MountPath, holders))
-			}
-			if err := mount.Unmount(cfg.MountPath); err != nil {
-				return v.rollbackToSealed(loopPath, fmt.Errorf("vault: unseal %s: %w", cfg.ImagePath, err))
-			}
-		}
-		if err := mount.MountReal(mapperPath, cfg.Fstype, cfg.MountPath); err != nil {
+	if mountedOK {
+		holders, err := mount.CheckHandles(cfg.MountPath)
+		if err != nil {
 			return v.rollbackToSealed(loopPath, fmt.Errorf("vault: unseal %s: %w", cfg.ImagePath, err))
 		}
+		if len(holders) > 0 {
+			return v.rollbackToSealed(loopPath, fmt.Errorf(
+				"vault: refusing to unseal %s: %s still held by %v", cfg.ImagePath, cfg.MountPath, holders))
+		}
+		if err := mount.Unmount(cfg.MountPath); err != nil {
+			return v.rollbackToSealed(loopPath, fmt.Errorf("vault: unseal %s: %w", cfg.ImagePath, err))
+		}
+	}
+	if err := mount.MountReal(mapperPath, cfg.Fstype, cfg.MountPath); err != nil {
+		return v.rollbackToSealed(loopPath, fmt.Errorf("vault: unseal %s: %w", cfg.ImagePath, err))
 	}
 
 	return nil
@@ -220,10 +221,10 @@ func (v *Vault) Seal(timeout, pollInterval time.Duration) error {
 		return fmt.Errorf("vault: seal %s: %w", cfg.ImagePath, err)
 	}
 
+	if mountedOK && source != mapperPath {
+		return fmt.Errorf("vault: seal %s: refusing to seal, unexpected mount source %q at %s", cfg.ImagePath, source, cfg.MountPath)
+	}
 	if mountedOK {
-		if source != mapperPath {
-			return fmt.Errorf("vault: seal %s: refusing to seal, unexpected mount source %q at %s", cfg.ImagePath, source, cfg.MountPath)
-		}
 		holders, err := mount.WaitForNoHandles(cfg.MountPath, timeout, pollInterval)
 		if err != nil {
 			return fmt.Errorf("vault: seal %s: %w", cfg.ImagePath, err)
@@ -245,12 +246,15 @@ func (v *Vault) Seal(timeout, pollInterval time.Duration) error {
 		return fmt.Errorf("vault: seal %s: %w", cfg.ImagePath, err)
 	}
 
-	if loopPath, ok, err := luks.FindLoopDevice(cfg.ImagePath); err != nil {
+	loopPath, ok, err := luks.FindLoopDevice(cfg.ImagePath)
+	if err != nil {
 		return fmt.Errorf("vault: seal %s: %w", cfg.ImagePath, err)
-	} else if ok {
-		if err := luks.DetachLoop(loopPath); err != nil {
-			return fmt.Errorf("vault: seal %s: %w", cfg.ImagePath, err)
-		}
+	}
+	if !ok {
+		return nil
+	}
+	if err := luks.DetachLoop(loopPath); err != nil {
+		return fmt.Errorf("vault: seal %s: %w", cfg.ImagePath, err)
 	}
 
 	return nil

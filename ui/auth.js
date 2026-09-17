@@ -1,6 +1,6 @@
 "use strict";
 
-const crypto = require("crypto");
+const crypto = require("node:crypto");
 const state = require("./state");
 
 const SCRYPT_KEYLEN = 64;
@@ -146,7 +146,7 @@ function isValidSession(token) {
 
 // Go to login if not logged in //
 function requireAuth(req, res, next) {
-  const token = req.cookies && req.cookies[SESSION_COOKIE];
+  const token = req.cookies?.[SESSION_COOKIE];
   if (!isValidSession(token)) {
     return res.redirect(302, "/login");
   }

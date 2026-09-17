@@ -9,7 +9,7 @@ const attempts = new Map(); // ip -> { count, windowStart, lockedUntil }
 // 0 = not locked, above 0 = ms until unlocked //
 function msUntilUnlocked(ip) {
   const record = attempts.get(ip);
-  if (!record || !record.lockedUntil) return 0;
+  if (!record?.lockedUntil) return 0;
   const remaining = record.lockedUntil - Date.now();
   if (remaining <= 0) {
     attempts.delete(ip);

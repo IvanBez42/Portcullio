@@ -33,6 +33,22 @@ func clearImmutable(t *testing.T, path string) {
 	}
 }
 
+// Fails the test immediately if err is non-nil //
+func requireNoErr(t *testing.T, err error, label string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+}
+
+// Fails the test immediately if err is nil //
+func requireErr(t *testing.T, err error, msg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal(msg)
+	}
+}
+
 // Creates a real, provisioned vault + fresh mount path //
 func provisionTestVault(t *testing.T, mapperName string) vault.Config {
 	t.Helper()
@@ -51,15 +67,13 @@ func provisionTestVault(t *testing.T, mapperName string) vault.Config {
 		os.Remove(imagePath)
 	})
 
-	if err := provision.CreateVault(provision.CreateVaultParams{
+	requireNoErr(t, provision.CreateVault(provision.CreateVaultParams{
 		ImagePath:  imagePath,
 		SizeMB:     64,
 		Fstype:     "ext4",
 		MapperName: mapperName,
 		Passphrase: []byte(testPassphrase),
-	}); err != nil {
-		t.Fatalf("CreateVault: %v", err)
-	}
+	}), "CreateVault")
 
 	mountPath := t.TempDir()
 	t.Cleanup(func() { clearImmutable(t, mountPath) })
@@ -82,9 +96,7 @@ func TestUnsealThenStatusUnsealed(t *testing.T) {
 	cfg := provisionTestVault(t, "portcullio-vault-unseal-1")
 	v := vault.New(cfg)
 
-	if err := v.Unseal([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Unseal: %v", err)
-	}
+	requireNoErr(t, v.Unseal([]byte(testPassphrase)), "Unseal")
 	t.Cleanup(func() {
 		if err := v.Seal(2*time.Second, 100*time.Millisecond); err != nil {
 			t.Logf("Seal cleanup: %v", err)
@@ -92,9 +104,7 @@ func TestUnsealThenStatusUnsealed(t *testing.T) {
 	})
 
 	info, err := v.Status()
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
+	requireNoErr(t, err, "Status")
 	if info.State != vault.Unsealed {
 		t.Fatalf("Status = %v, want Unsealed", info.State)
 	}
@@ -106,32 +116,22 @@ func TestSealThenStatusSealed(t *testing.T) {
 	cfg := provisionTestVault(t, "portcullio-vault-seal-1")
 	v := vault.New(cfg)
 
-	if err := v.Unseal([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Unseal: %v", err)
-	}
-	if err := v.Seal(2*time.Second, 100*time.Millisecond); err != nil {
-		t.Fatalf("Seal: %v", err)
-	}
+	requireNoErr(t, v.Unseal([]byte(testPassphrase)), "Unseal")
+	requireNoErr(t, v.Seal(2*time.Second, 100*time.Millisecond), "Seal")
 
 	info, err := v.Status()
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
+	requireNoErr(t, err, "Status")
 	if info.State != vault.Sealed {
 		t.Fatalf("Status = %v, want Sealed", info.State)
 	}
 
 	_, ok, err := mount.MountedSource(cfg.MountPath)
-	if err != nil {
-		t.Fatalf("MountedSource: %v", err)
-	}
+	requireNoErr(t, err, "MountedSource")
 	if ok {
 		t.Fatalf("MountedSource reports something still mounted at %s after Seal, want nothing mounted", cfg.MountPath)
 	}
 	immutable, err := mount.IsImmutable(cfg.MountPath)
-	if err != nil {
-		t.Fatalf("IsImmutable: %v", err)
-	}
+	requireNoErr(t, err, "IsImmutable")
 	if !immutable {
 		t.Fatalf("IsImmutable = false after Seal, want true")
 	}
@@ -143,14 +143,10 @@ func TestSealAbortsOnHeldHandle(t *testing.T) {
 	cfg := provisionTestVault(t, "portcullio-vault-seal-held")
 	v := vault.New(cfg)
 
-	if err := v.Unseal([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Unseal: %v", err)
-	}
+	requireNoErr(t, v.Unseal([]byte(testPassphrase)), "Unseal")
 
 	f, err := os.Create(filepath.Join(cfg.MountPath, "held.txt"))
-	if err != nil {
-		t.Fatalf("create held file: %v", err)
-	}
+	requireNoErr(t, err, "create held file")
 	t.Cleanup(func() {
 		_ = f.Close()
 		if err := v.Seal(2*time.Second, 100*time.Millisecond); err != nil {
@@ -158,14 +154,10 @@ func TestSealAbortsOnHeldHandle(t *testing.T) {
 		}
 	})
 
-	if err := v.Seal(300*time.Millisecond, 50*time.Millisecond); err == nil {
-		t.Fatalf("Seal succeeded while a file was held open, want refusal")
-	}
+	requireErr(t, v.Seal(300*time.Millisecond, 50*time.Millisecond), "Seal succeeded while a file was held open, want refusal")
 
 	info, err := v.Status()
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
+	requireNoErr(t, err, "Status")
 	if info.State != vault.Unsealed {
 		t.Fatalf("Status after aborted Seal = %v, want still Unsealed", info.State)
 	}
@@ -192,27 +184,19 @@ func TestEnsureSealedBootstrapsFromNothing(t *testing.T) {
 	}
 	v := vault.New(cfg)
 
-	if err := v.EnsureSealed(); err != nil {
-		t.Fatalf("EnsureSealed: %v", err)
-	}
+	requireNoErr(t, v.EnsureSealed(), "EnsureSealed")
 	_, ok, err := mount.MountedSource(mountPath)
-	if err != nil {
-		t.Fatalf("MountedSource: %v", err)
-	}
+	requireNoErr(t, err, "MountedSource")
 	if ok {
 		t.Fatalf("MountedSource reports something mounted at %s after EnsureSealed, want nothing mounted", mountPath)
 	}
 	immutable, err := mount.IsImmutable(mountPath)
-	if err != nil {
-		t.Fatalf("IsImmutable: %v", err)
-	}
+	requireNoErr(t, err, "IsImmutable")
 	if !immutable {
 		t.Fatalf("IsImmutable = false after EnsureSealed, want true")
 	}
 
-	if err := v.EnsureSealed(); err != nil {
-		t.Fatalf("second EnsureSealed call: %v", err)
-	}
+	requireNoErr(t, v.EnsureSealed(), "second EnsureSealed call")
 }
 
 // Checks Status reports Unsealing during a transition //
@@ -239,9 +223,7 @@ func TestStatusReportsUnsealingDuringTransition(t *testing.T) {
 
 	unsealErr := v.Unseal([]byte(testPassphrase))
 	close(done)
-	if unsealErr != nil {
-		t.Fatalf("Unseal: %v", unsealErr)
-	}
+	requireNoErr(t, unsealErr, "Unseal")
 	t.Cleanup(func() {
 		if err := v.Seal(2*time.Second, 100*time.Millisecond); err != nil {
 			t.Logf("Seal cleanup: %v", err)
@@ -273,14 +255,10 @@ func TestReconcileNoOpWhenSealed(t *testing.T) {
 		MountPath:    mountPath,
 	}
 	v := vault.New(cfg)
-	if err := v.EnsureSealed(); err != nil {
-		t.Fatalf("EnsureSealed: %v", err)
-	}
+	requireNoErr(t, v.EnsureSealed(), "EnsureSealed")
 
 	healed, info, err := v.Reconcile(2*time.Second, 100*time.Millisecond)
-	if err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
+	requireNoErr(t, err, "Reconcile")
 	if healed {
 		t.Fatalf("Reconcile healed = true against an already-Sealed vault, want no-op")
 	}
@@ -297,15 +275,9 @@ func TestReconcileHealsDegradedVault(t *testing.T) {
 
 	dir := t.TempDir()
 	dev, err := loopback.Create(dir, 64)
-	if err != nil {
-		t.Fatalf("loopback.Create: %v", err)
-	}
-	if err := dev.Attach(); err != nil {
-		t.Fatalf("Attach: %v", err)
-	}
-	if err := dev.Format([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Format: %v", err)
-	}
+	requireNoErr(t, err, "loopback.Create")
+	requireNoErr(t, dev.Attach(), "Attach")
+	requireNoErr(t, dev.Format([]byte(testPassphrase)), "Format")
 	imagePath := dev.BackingPath()
 	const mapperName = "portcullio-vault-reconcile-heal"
 
@@ -316,9 +288,7 @@ func TestReconcileHealsDegradedVault(t *testing.T) {
 		}
 	})
 
-	if err := luks.Open(dev.LoopPath(), mapperName, []byte(testPassphrase)); err != nil {
-		t.Fatalf("luks.Open: %v", err)
-	}
+	requireNoErr(t, luks.Open(dev.LoopPath(), mapperName, []byte(testPassphrase)), "luks.Open")
 
 	mountPath := t.TempDir()
 	t.Cleanup(func() { clearImmutable(t, mountPath) })
@@ -338,17 +308,13 @@ func TestReconcileHealsDegradedVault(t *testing.T) {
 	v := vault.New(cfg)
 
 	before, err := v.Status()
-	if err != nil {
-		t.Fatalf("Status (before): %v", err)
-	}
+	requireNoErr(t, err, "Status (before)")
 	if before.State != vault.Degraded {
 		t.Fatalf("Status (before) = %v, want Degraded (mapper open, nothing mounted at mount path)", before.State)
 	}
 
 	healed, info, err := v.Reconcile(2*time.Second, 100*time.Millisecond)
-	if err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
+	requireNoErr(t, err, "Reconcile")
 	if !healed {
 		t.Fatalf("Reconcile healed = false, want true")
 	}
@@ -357,9 +323,7 @@ func TestReconcileHealsDegradedVault(t *testing.T) {
 	}
 
 	mapped, err := luks.IsMapped(mapperName)
-	if err != nil {
-		t.Fatalf("IsMapped: %v", err)
-	}
+	requireNoErr(t, err, "IsMapped")
 	if mapped {
 		t.Fatalf("IsMapped = true after Reconcile, want mapper closed")
 	}
@@ -374,15 +338,9 @@ func TestReconcileReportsFailureOnUnrecognizedMount(t *testing.T) {
 	// dev1: the vault under test //
 	dir1 := t.TempDir()
 	dev1, err := loopback.Create(dir1, 64)
-	if err != nil {
-		t.Fatalf("loopback.Create (dev1): %v", err)
-	}
-	if err := dev1.Attach(); err != nil {
-		t.Fatalf("Attach (dev1): %v", err)
-	}
-	if err := dev1.Format([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Format (dev1): %v", err)
-	}
+	requireNoErr(t, err, "loopback.Create (dev1)")
+	requireNoErr(t, dev1.Attach(), "Attach (dev1)")
+	requireNoErr(t, dev1.Format([]byte(testPassphrase)), "Format (dev1)")
 	imagePath := dev1.BackingPath()
 	const mapperName = "portcullio-vault-reconcile-unrecognized"
 	t.Cleanup(func() {
@@ -391,33 +349,21 @@ func TestReconcileReportsFailureOnUnrecognizedMount(t *testing.T) {
 			_ = luks.DetachLoop(loopPath)
 		}
 	})
-	if err := luks.Open(dev1.LoopPath(), mapperName, []byte(testPassphrase)); err != nil {
-		t.Fatalf("luks.Open (dev1): %v", err)
-	}
+	requireNoErr(t, luks.Open(dev1.LoopPath(), mapperName, []byte(testPassphrase)), "luks.Open (dev1)")
 
 	// dev2: an unrelated device standing in for something unrecognized //
 	dir2 := t.TempDir()
 	dev2, err := loopback.Create(dir2, 64)
-	if err != nil {
-		t.Fatalf("loopback.Create (dev2): %v", err)
-	}
+	requireNoErr(t, err, "loopback.Create (dev2)")
 	t.Cleanup(func() {
 		if err := dev2.TeardownAll(); err != nil {
 			t.Logf("dev2 teardown: %v", err)
 		}
 	})
-	if err := dev2.Attach(); err != nil {
-		t.Fatalf("Attach (dev2): %v", err)
-	}
-	if err := dev2.Format([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Format (dev2): %v", err)
-	}
-	if err := dev2.Open([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Open (dev2): %v", err)
-	}
-	if err := loopback.Mkfs(dev2.MapperPath(), "ext4"); err != nil {
-		t.Fatalf("Mkfs (dev2): %v", err)
-	}
+	requireNoErr(t, dev2.Attach(), "Attach (dev2)")
+	requireNoErr(t, dev2.Format([]byte(testPassphrase)), "Format (dev2)")
+	requireNoErr(t, dev2.Open([]byte(testPassphrase)), "Open (dev2)")
+	requireNoErr(t, loopback.Mkfs(dev2.MapperPath(), "ext4"), "Mkfs (dev2)")
 
 	mountPath := t.TempDir()
 	t.Cleanup(func() {
@@ -425,9 +371,7 @@ func TestReconcileReportsFailureOnUnrecognizedMount(t *testing.T) {
 			t.Logf("Unmount cleanup: %v", err)
 		}
 	})
-	if err := mount.MountReal(dev2.MapperPath(), "ext4", mountPath); err != nil {
-		t.Fatalf("MountReal (dev2 onto shared mountPath): %v", err)
-	}
+	requireNoErr(t, mount.MountReal(dev2.MapperPath(), "ext4", mountPath), "MountReal (dev2 onto shared mountPath)")
 
 	cfg := vault.Config{
 		ImagePath:    imagePath,
@@ -438,17 +382,13 @@ func TestReconcileReportsFailureOnUnrecognizedMount(t *testing.T) {
 	v := vault.New(cfg)
 
 	before, err := v.Status()
-	if err != nil {
-		t.Fatalf("Status (before): %v", err)
-	}
+	requireNoErr(t, err, "Status (before)")
 	if before.State != vault.Degraded {
 		t.Fatalf("Status (before) = %v, want Degraded (dev1 mapped, dev2's fs mounted at its path)", before.State)
 	}
 
 	healed, info, err := v.Reconcile(300*time.Millisecond, 50*time.Millisecond)
-	if err == nil {
-		t.Fatalf("Reconcile succeeded against an unrecognized mount, want refusal")
-	}
+	requireErr(t, err, "Reconcile succeeded against an unrecognized mount, want refusal")
 	if healed {
 		t.Fatalf("Reconcile healed = true, want false")
 	}

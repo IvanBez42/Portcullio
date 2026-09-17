@@ -20,6 +20,14 @@ import (
 
 const testPassphrase = "test-passphrase-only"
 
+// Fails the test immediately if err is non-nil //
+func requireNoErr(t *testing.T, err error, label string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+}
+
 func requireBinaries(t *testing.T, bins ...string) {
 	t.Helper()
 	for _, bin := range bins {
@@ -40,9 +48,8 @@ func requireDocker(t *testing.T) {
 func randomContainerName(t *testing.T, prefix string) string {
 	t.Helper()
 	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("generate random container name: %v", err)
-	}
+	_, err := rand.Read(b)
+	requireNoErr(t, err, "generate random container name")
 	return prefix + "-" + hex.EncodeToString(b)
 }
 
@@ -78,12 +85,8 @@ func newHandlerConfig(t *testing.T) socket.HandlerConfig {
 	dir := t.TempDir()
 	inputDir := filepath.Join(dir, "input")
 	mountArea := filepath.Join(dir, "mounts")
-	if err := os.MkdirAll(inputDir, 0o700); err != nil {
-		t.Fatalf("mkdir input dir: %v", err)
-	}
-	if err := os.MkdirAll(mountArea, 0o700); err != nil {
-		t.Fatalf("mkdir mount area: %v", err)
-	}
+	requireNoErr(t, os.MkdirAll(inputDir, 0o700), "mkdir input dir")
+	requireNoErr(t, os.MkdirAll(mountArea, 0o700), "mkdir mount area")
 	return socket.HandlerConfig{
 		InputDir:          inputDir,
 		MountAreaDir:      mountArea,
@@ -124,9 +127,7 @@ func startServer(t *testing.T, handler *socket.AgentHandler) string {
 	t.Helper()
 	sockPath := filepath.Join(t.TempDir(), "agent.sock")
 	srv, err := socket.NewServer(sockPath, handler)
-	if err != nil {
-		t.Fatalf("NewServer: %v", err)
-	}
+	requireNoErr(t, err, "NewServer")
 	go func() {
 		_ = srv.Serve()
 	}()
@@ -487,21 +488,11 @@ func makeDegradedUnrecognizedMount(t *testing.T, cfg socket.HandlerConfig, vault
 
 	dir := t.TempDir()
 	dev, err := loopback.Create(dir, 64)
-	if err != nil {
-		t.Fatalf("loopback.Create (unrelated device): %v", err)
-	}
-	if err := dev.Attach(); err != nil {
-		t.Fatalf("Attach (unrelated device): %v", err)
-	}
-	if err := dev.Format([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Format (unrelated device): %v", err)
-	}
-	if err := dev.Open([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Open (unrelated device): %v", err)
-	}
-	if err := loopback.Mkfs(dev.MapperPath(), cfg.Fstype); err != nil {
-		t.Fatalf("Mkfs (unrelated device): %v", err)
-	}
+	requireNoErr(t, err, "loopback.Create (unrelated device)")
+	requireNoErr(t, dev.Attach(), "Attach (unrelated device)")
+	requireNoErr(t, dev.Format([]byte(testPassphrase)), "Format (unrelated device)")
+	requireNoErr(t, dev.Open([]byte(testPassphrase)), "Open (unrelated device)")
+	requireNoErr(t, loopback.Mkfs(dev.MapperPath(), cfg.Fstype), "Mkfs (unrelated device)")
 
 	if err := os.MkdirAll(mountPath, 0o700); err != nil {
 		t.Fatalf("mkdir mount path for %s: %v", vaultID, err)
@@ -525,11 +516,9 @@ func TestReconcileAllHealsDegradedVaults(t *testing.T) {
 	handler := socket.NewAgentHandler(cfg)
 
 	var logs []string
-	if err := handler.ReconcileAll(2*time.Second, 100*time.Millisecond, func(msg string) {
+	requireNoErr(t, handler.ReconcileAll(2*time.Second, 100*time.Millisecond, func(msg string) {
 		logs = append(logs, msg)
-	}); err != nil {
-		t.Fatalf("ReconcileAll: %v", err)
-	}
+	}), "ReconcileAll")
 
 	if len(logs) != 1 {
 		t.Fatalf("ReconcileAll logs = %v, want exactly one line", logs)
@@ -567,11 +556,9 @@ func TestReconcileAllContinuesPastAnUnhealableVault(t *testing.T) {
 	handler := socket.NewAgentHandler(cfg)
 
 	var logs []string
-	if err := handler.ReconcileAll(300*time.Millisecond, 50*time.Millisecond, func(msg string) {
+	requireNoErr(t, handler.ReconcileAll(300*time.Millisecond, 50*time.Millisecond, func(msg string) {
 		logs = append(logs, msg)
-	}); err != nil {
-		t.Fatalf("ReconcileAll: %v", err)
-	}
+	}), "ReconcileAll")
 
 	if len(logs) != 1 {
 		t.Fatalf("ReconcileAll logs = %v, want exactly one line", logs)
@@ -705,9 +692,7 @@ func TestSpaceListsLockerSubdirectories(t *testing.T) {
 		}
 	}
 	// A loose file directly in InputDir must not be mistaken for a locker //
-	if err := os.WriteFile(filepath.Join(cfg.InputDir, "stray.img"), nil, 0o600); err != nil {
-		t.Fatalf("write stray file: %v", err)
-	}
+	requireNoErr(t, os.WriteFile(filepath.Join(cfg.InputDir, "stray.img"), nil, 0o600), "write stray file")
 
 	handler := socket.NewAgentHandler(cfg)
 	sockPath := startServer(t, handler)
@@ -737,9 +722,7 @@ func TestSpaceListsLockerSubdirectories(t *testing.T) {
 // Checks the space verb, scoped to one locker, reports just that locker's space //
 func TestSpaceWithLockerReturnsJustThatLockersSpace(t *testing.T) {
 	cfg := newHandlerConfig(t)
-	if err := os.MkdirAll(filepath.Join(cfg.InputDir, "movies"), 0o700); err != nil {
-		t.Fatalf("mkdir locker: %v", err)
-	}
+	requireNoErr(t, os.MkdirAll(filepath.Join(cfg.InputDir, "movies"), 0o700), "mkdir locker")
 
 	handler := socket.NewAgentHandler(cfg)
 	sockPath := startServer(t, handler)
