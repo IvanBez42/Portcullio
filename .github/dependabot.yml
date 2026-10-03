@@ -26,3 +26,14 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/agent"
+      - "/ui"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker-images:
+        patterns:
+          - "*"
