@@ -1,5 +1,7 @@
 "use strict";
 
+const http = require("node:http");
+const https = require("node:https");
 const path = require("node:path");
 const express = require("express");
 const rateLimit = require("express-rate-limit");
@@ -11,6 +13,7 @@ const agentClient = require("./agentClient");
 const loginThrottle = require("./loginThrottle");
 const csrf = require("./csrf");
 const vaultIdLib = require("./vaultId");
+const tls = require("./tls");
 
 const PORT = process.env.PORT || 8080;
 
@@ -120,6 +123,7 @@ app.post("/login", loginRateLimit, (req, res) => {
   res.cookie(auth.SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "strict",
+    secure: tls.enabled,
     path: "/",
   });
   res.redirect(302, "/dashboard");
@@ -476,6 +480,11 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-app.listen(PORT, () => {
-  console.log(`portcullio ui: listening on :${PORT}`);
+// HTTPS by default; PORTCULLIO_TLS=off for a TLS-terminating reverse proxy //
+const server = tls.enabled
+  ? https.createServer(tls.loadOrCreate(), app)
+  : http.createServer(app);
+
+server.listen(PORT, () => {
+  console.log(`portcullio ui: listening on ${tls.enabled ? "https" : "http"}://:${PORT}`);
 });

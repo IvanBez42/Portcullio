@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const { doubleCsrf } = require("csrf-csrf");
 const state = require("./state");
 const auth = require("./auth");
+const tls = require("./tls");
 
 // Persists the secret so outstanding CSRF cookies survive a container restart //
 function getOrCreateSecret() {
@@ -25,7 +26,7 @@ const { doubleCsrfProtection, invalidCsrfTokenError } = doubleCsrf({
   cookieOptions: {
     sameSite: "strict",
     path: "/",
-    secure: false,
+    secure: tls.enabled,
     httpOnly: true,
   },
   getCsrfTokenFromRequest: (req) => req.body?._csrf,

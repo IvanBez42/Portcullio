@@ -59,6 +59,7 @@ function deleteVaultServices(vaultId) {
 }
 
 module.exports = {
+  STATE_DIR,
   load,
   save,
   getVaultServices,
