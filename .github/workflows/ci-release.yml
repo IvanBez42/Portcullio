@@ -2,9 +2,10 @@ name: CI and Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -60,6 +61,15 @@ jobs:
       - name: Normalize owner to lowercase for GHCR
         run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
+      # main and v* tags publish :latest; dev (or a manual run on any other branch) publishes :dev
+      - name: Pick image tag
+        run: |
+          if [[ "$GITHUB_REF" == "refs/heads/main" || "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "CHANNEL=latest" >> "$GITHUB_ENV"
+          else
+            echo "CHANNEL=dev" >> "$GITHUB_ENV"
+          fi
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -74,7 +84,7 @@ jobs:
           file: ./agent/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER_LC }}/portcullio-agent:latest
+            ghcr.io/${{ env.OWNER_LC }}/portcullio-agent:${{ env.CHANNEL }}
             ghcr.io/${{ env.OWNER_LC }}/portcullio-agent:${{ github.sha }}
 
       - name: Build and push UI image
@@ -84,7 +94,7 @@ jobs:
           file: ./ui/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER_LC }}/portcullio-ui:latest
+            ghcr.io/${{ env.OWNER_LC }}/portcullio-ui:${{ env.CHANNEL }}
             ghcr.io/${{ env.OWNER_LC }}/portcullio-ui:${{ github.sha }}
 
   release:
