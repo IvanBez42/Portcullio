@@ -9,10 +9,11 @@ const state = require("./state");
 const CERT_FILE = "tls.crt";
 const KEY_FILE = "tls.key";
 const CERT_VALID_DAYS = 3650; // 10y //
+const OPENSSL = "/usr/bin/openssl"; // absolute so $PATH can't swap in a fake binary //
 
 function parseMode(value) {
-  if (value === undefined || value === "" || value === "on") return true;
-  if (value === "off") return false;
+  if (value === "on") return true;
+  if (value === undefined || value === "" || value === "off") return false;
   throw new Error(
     `tls: invalid PORTCULLIO_TLS=${JSON.stringify(value)} (expected "on" or "off")`,
   );
@@ -32,7 +33,7 @@ function generate(dir) {
   const tmpCert = path.join(dir, CERT_FILE + suffix);
   try {
     execFileSync(
-      "openssl",
+      OPENSSL,
       [
         "req",
         "-x509",
@@ -60,6 +61,11 @@ function generate(dir) {
   } catch (err) {
     fs.rmSync(tmpKey, { force: true });
     fs.rmSync(tmpCert, { force: true });
+    if (err.code === "ENOENT") {
+      throw new Error(
+        `tls: ${OPENSSL} not found; install openssl there, set PORTCULLIO_TLS_CERT and PORTCULLIO_TLS_KEY, or set PORTCULLIO_TLS=off`,
+      );
+    }
     throw new Error(`tls: generate self-signed certificate: ${err.message}`);
   }
 }

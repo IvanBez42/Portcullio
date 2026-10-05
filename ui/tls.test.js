@@ -14,9 +14,9 @@ function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "portcullio-tls-test-"));
 }
 
-test("parseMode defaults to on and accepts on/off", () => {
-  assert.equal(tls.parseMode(undefined), true);
-  assert.equal(tls.parseMode(""), true);
+test("parseMode defaults to off and accepts on/off", () => {
+  assert.equal(tls.parseMode(undefined), false);
+  assert.equal(tls.parseMode(""), false);
   assert.equal(tls.parseMode("on"), true);
   assert.equal(tls.parseMode("off"), false);
 });
