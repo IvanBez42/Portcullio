@@ -35,6 +35,22 @@ func requireBinaries(t *testing.T, bins ...string) {
 	}
 }
 
+// Fails the test immediately if err is non-nil //
+func requireNoErr(t *testing.T, err error, label string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+}
+
+// Fails the test immediately if err is nil //
+func requireErr(t *testing.T, err error, msg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal(msg)
+	}
+}
+
 // Checks MountReal/MountedSource/IsMounted on a real filesystem //
 func TestMountReal(t *testing.T) {
 	loopback.RequireRoot(t)
@@ -43,20 +59,14 @@ func TestMountReal(t *testing.T) {
 
 	dir := t.TempDir()
 	dev, err := loopback.Create(dir, 64)
-	if err != nil {
-		t.Fatalf("loopback.Create: %v", err)
-	}
+	requireNoErr(t, err, "loopback.Create")
 	t.Cleanup(func() {
 		if err := dev.TeardownAll(); err != nil {
 			t.Logf("teardown: %v", err)
 		}
 	})
-	if err := dev.Attach(); err != nil {
-		t.Fatalf("Attach: %v", err)
-	}
-	if err := dev.Format([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Format: %v", err)
-	}
+	requireNoErr(t, dev.Attach(), "Attach")
+	requireNoErr(t, dev.Format([]byte(testPassphrase)), "Format")
 
 	const mapperName = "portcullio-mount-selftest"
 	t.Cleanup(func() {
@@ -64,14 +74,10 @@ func TestMountReal(t *testing.T) {
 			t.Logf("luks.Close cleanup: %v", err)
 		}
 	})
-	if err := luks.Open(dev.LoopPath(), mapperName, []byte(testPassphrase)); err != nil {
-		t.Fatalf("luks.Open: %v", err)
-	}
+	requireNoErr(t, luks.Open(dev.LoopPath(), mapperName, []byte(testPassphrase)), "luks.Open")
 	mapperPath := luks.MapperPath(mapperName)
 
-	if err := loopback.Mkfs(mapperPath, "ext4"); err != nil {
-		t.Fatalf("loopback.Mkfs: %v", err)
-	}
+	requireNoErr(t, loopback.Mkfs(mapperPath, "ext4"), "loopback.Mkfs")
 
 	target := t.TempDir()
 	t.Cleanup(func() {
@@ -79,32 +85,22 @@ func TestMountReal(t *testing.T) {
 			t.Logf("Unmount cleanup: %v", err)
 		}
 	})
-	if err := mount.MountReal(mapperPath, "ext4", target); err != nil {
-		t.Fatalf("MountReal: %v", err)
-	}
+	requireNoErr(t, mount.MountReal(mapperPath, "ext4", target), "MountReal")
 
 	mounted, err := mount.IsMounted(target)
-	if err != nil {
-		t.Fatalf("IsMounted: %v", err)
-	}
+	requireNoErr(t, err, "IsMounted")
 	if !mounted {
 		t.Fatalf("IsMounted = false right after MountReal")
 	}
 	source, ok, err := mount.MountedSource(target)
-	if err != nil {
-		t.Fatalf("MountedSource: %v", err)
-	}
+	requireNoErr(t, err, "MountedSource")
 	if !ok || source != mapperPath {
 		t.Fatalf("MountedSource = (%q, %v), want (%q, true)", source, ok, mapperPath)
 	}
 
-	if err := mount.Unmount(target); err != nil {
-		t.Fatalf("Unmount: %v", err)
-	}
+	requireNoErr(t, mount.Unmount(target), "Unmount")
 	mounted, err = mount.IsMounted(target)
-	if err != nil {
-		t.Fatalf("IsMounted after Unmount: %v", err)
-	}
+	requireNoErr(t, err, "IsMounted after Unmount")
 	if mounted {
 		t.Fatalf("IsMounted = true after Unmount")
 	}
@@ -116,9 +112,7 @@ func TestTmpfsStubSwap(t *testing.T) {
 	loopback.RequireRoot(t)
 
 	stubDir := t.TempDir()
-	if err := mountTmpfs(stubDir, 16); err != nil {
-		t.Fatalf("MountTmpfs: %v", err)
-	}
+	requireNoErr(t, mountTmpfs(stubDir, 16), "MountTmpfs")
 	unmounted := false
 	t.Cleanup(func() {
 		if unmounted {
@@ -130,24 +124,17 @@ func TestTmpfsStubSwap(t *testing.T) {
 	})
 
 	source, ok, err := mount.MountedSource(stubDir)
-	if err != nil {
-		t.Fatalf("MountedSource: %v", err)
-	}
+	requireNoErr(t, err, "MountedSource")
 	if !ok || source != "tmpfs" {
 		t.Fatalf("MountedSource = (%q, %v), want (\"tmpfs\", true)", source, ok)
 	}
 
 	canary := filepath.Join(stubDir, "canary.txt")
-	if err := os.WriteFile(canary, []byte("plaintext that must never reach real disk"), 0o644); err != nil {
-		t.Fatalf("write canary: %v", err)
-	}
-	if _, err := os.Stat(canary); err != nil {
-		t.Fatalf("canary should exist while tmpfs is mounted: %v", err)
-	}
+	requireNoErr(t, os.WriteFile(canary, []byte("plaintext that must never reach real disk"), 0o644), "write canary")
+	_, err = os.Stat(canary)
+	requireNoErr(t, err, "canary should exist while tmpfs is mounted")
 
-	if err := mount.Unmount(stubDir); err != nil {
-		t.Fatalf("Unmount: %v", err)
-	}
+	requireNoErr(t, mount.Unmount(stubDir), "Unmount")
 	unmounted = true
 
 	if _, err := os.Stat(canary); !os.IsNotExist(err) {
@@ -161,9 +148,7 @@ func TestCheckHandles(t *testing.T) {
 	loopback.RequireRoot(t)
 
 	stubDir := t.TempDir()
-	if err := mountTmpfs(stubDir, 16); err != nil {
-		t.Fatalf("MountTmpfs: %v", err)
-	}
+	requireNoErr(t, mountTmpfs(stubDir, 16), "MountTmpfs")
 	t.Cleanup(func() {
 		if err := mount.Unmount(stubDir); err != nil {
 			t.Logf("Unmount cleanup: %v", err)
@@ -171,26 +156,18 @@ func TestCheckHandles(t *testing.T) {
 	})
 
 	f, err := os.Create(filepath.Join(stubDir, "held.txt"))
-	if err != nil {
-		t.Fatalf("create held file: %v", err)
-	}
+	requireNoErr(t, err, "create held file")
 
 	holders, err := mount.CheckHandles(stubDir)
-	if err != nil {
-		t.Fatalf("CheckHandles (file open): %v", err)
-	}
+	requireNoErr(t, err, "CheckHandles (file open)")
 	if len(holders) == 0 {
 		t.Fatalf("CheckHandles found no holders while a file is open under %s", stubDir)
 	}
 
-	if err := f.Close(); err != nil {
-		t.Fatalf("close held file: %v", err)
-	}
+	requireNoErr(t, f.Close(), "close held file")
 
 	holders, err = mount.CheckHandles(stubDir)
-	if err != nil {
-		t.Fatalf("CheckHandles (file closed): %v", err)
-	}
+	requireNoErr(t, err, "CheckHandles (file closed)")
 	if len(holders) != 0 {
 		t.Fatalf("CheckHandles still reports holders after close: %v", holders)
 	}
@@ -202,9 +179,7 @@ func TestWaitForNoHandles(t *testing.T) {
 	loopback.RequireRoot(t)
 
 	stubDir := t.TempDir()
-	if err := mountTmpfs(stubDir, 16); err != nil {
-		t.Fatalf("MountTmpfs: %v", err)
-	}
+	requireNoErr(t, mountTmpfs(stubDir, 16), "MountTmpfs")
 	t.Cleanup(func() {
 		if err := mount.Unmount(stubDir); err != nil {
 			t.Logf("Unmount cleanup: %v", err)
@@ -212,18 +187,14 @@ func TestWaitForNoHandles(t *testing.T) {
 	})
 
 	f, err := os.Create(filepath.Join(stubDir, "held.txt"))
-	if err != nil {
-		t.Fatalf("create held file: %v", err)
-	}
+	requireNoErr(t, err, "create held file")
 	go func() {
 		time.Sleep(150 * time.Millisecond)
 		f.Close()
 	}()
 
 	holders, err := mount.WaitForNoHandles(stubDir, 2*time.Second, 50*time.Millisecond)
-	if err != nil {
-		t.Fatalf("WaitForNoHandles: %v", err)
-	}
+	requireNoErr(t, err, "WaitForNoHandles")
 	if len(holders) != 0 {
 		t.Fatalf("WaitForNoHandles returned holders after the handle was released: %v", holders)
 	}
@@ -243,14 +214,10 @@ func TestEnsureImmutableBlocksWrites(t *testing.T) {
 	loopback.RequireRoot(t)
 
 	dir := filepath.Join(t.TempDir(), "sealed-stub")
-	if err := mount.EnsureImmutable(dir); err != nil {
-		t.Fatalf("EnsureImmutable: %v", err)
-	}
+	requireNoErr(t, mount.EnsureImmutable(dir), "EnsureImmutable")
 	t.Cleanup(func() { clearImmutable(t, dir) })
 
-	if err := os.WriteFile(filepath.Join(dir, "canary.txt"), []byte("must never land here"), 0o644); err == nil {
-		t.Fatalf("write succeeded inside an immutable directory, want a permission error")
-	}
+	requireErr(t, os.WriteFile(filepath.Join(dir, "canary.txt"), []byte("must never land here"), 0o644), "write succeeded inside an immutable directory, want a permission error")
 }
 
 // Checks EnsureImmutable is idempotent //
@@ -259,14 +226,10 @@ func TestEnsureImmutableIdempotent(t *testing.T) {
 	loopback.RequireRoot(t)
 
 	dir := t.TempDir()
-	if err := mount.EnsureImmutable(dir); err != nil {
-		t.Fatalf("first EnsureImmutable: %v", err)
-	}
+	requireNoErr(t, mount.EnsureImmutable(dir), "first EnsureImmutable")
 	t.Cleanup(func() { clearImmutable(t, dir) })
 
-	if err := mount.EnsureImmutable(dir); err != nil {
-		t.Fatalf("second EnsureImmutable: %v", err)
-	}
+	requireNoErr(t, mount.EnsureImmutable(dir), "second EnsureImmutable")
 }
 
 // Checks the immutable flag survives a mount/umount cycle //
@@ -275,18 +238,12 @@ func TestEnsureImmutableSurvivesMountCycle(t *testing.T) {
 	loopback.RequireRoot(t)
 
 	dir := t.TempDir()
-	if err := mount.EnsureImmutable(dir); err != nil {
-		t.Fatalf("EnsureImmutable: %v", err)
-	}
+	requireNoErr(t, mount.EnsureImmutable(dir), "EnsureImmutable")
 	t.Cleanup(func() { clearImmutable(t, dir) })
 
-	if err := os.WriteFile(filepath.Join(dir, "before.txt"), []byte("x"), 0o644); err == nil {
-		t.Fatalf("write succeeded before mounting anything, want a permission error")
-	}
+	requireErr(t, os.WriteFile(filepath.Join(dir, "before.txt"), []byte("x"), 0o644), "write succeeded before mounting anything, want a permission error")
 
-	if err := mountTmpfs(dir, 16); err != nil {
-		t.Fatalf("MountTmpfs: %v", err)
-	}
+	requireNoErr(t, mountTmpfs(dir, 16), "MountTmpfs")
 	unmounted := false
 	t.Cleanup(func() {
 		if unmounted {
@@ -297,18 +254,12 @@ func TestEnsureImmutableSurvivesMountCycle(t *testing.T) {
 		}
 	})
 
-	if err := os.WriteFile(filepath.Join(dir, "during.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatalf("write failed while a real filesystem shadows the immutable directory: %v", err)
-	}
+	requireNoErr(t, os.WriteFile(filepath.Join(dir, "during.txt"), []byte("x"), 0o644), "write failed while a real filesystem shadows the immutable directory")
 
-	if err := mount.Unmount(dir); err != nil {
-		t.Fatalf("Unmount: %v", err)
-	}
+	requireNoErr(t, mount.Unmount(dir), "Unmount")
 	unmounted = true
 
-	if err := os.WriteFile(filepath.Join(dir, "after.txt"), []byte("x"), 0o644); err == nil {
-		t.Fatalf("write succeeded after unmount, want the underlying directory to still be immutable")
-	}
+	requireErr(t, os.WriteFile(filepath.Join(dir, "after.txt"), []byte("x"), 0o644), "write succeeded after unmount, want the underlying directory to still be immutable")
 }
 
 // Checks IsImmutable before and after EnsureImmutable //
@@ -318,22 +269,16 @@ func TestIsImmutable(t *testing.T) {
 
 	dir := t.TempDir()
 	before, err := mount.IsImmutable(dir)
-	if err != nil {
-		t.Fatalf("IsImmutable (before): %v", err)
-	}
+	requireNoErr(t, err, "IsImmutable (before)")
 	if before {
 		t.Fatalf("IsImmutable = true before EnsureImmutable ever ran")
 	}
 
-	if err := mount.EnsureImmutable(dir); err != nil {
-		t.Fatalf("EnsureImmutable: %v", err)
-	}
+	requireNoErr(t, mount.EnsureImmutable(dir), "EnsureImmutable")
 	t.Cleanup(func() { clearImmutable(t, dir) })
 
 	after, err := mount.IsImmutable(dir)
-	if err != nil {
-		t.Fatalf("IsImmutable (after): %v", err)
-	}
+	requireNoErr(t, err, "IsImmutable (after)")
 	if !after {
 		t.Fatalf("IsImmutable = false after EnsureImmutable")
 	}

@@ -1,6 +1,8 @@
 "use strict";
 
-const path = require("path");
+const http = require("node:http");
+const https = require("node:https");
+const path = require("node:path");
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const cookieParser = require("cookie-parser");
@@ -11,6 +13,7 @@ const agentClient = require("./agentClient");
 const loginThrottle = require("./loginThrottle");
 const csrf = require("./csrf");
 const vaultIdLib = require("./vaultId");
+const tls = require("./tls");
 
 const PORT = process.env.PORT || 8080;
 
@@ -23,7 +26,8 @@ const AGENT_SOCKET_PATH = "/socket/agent.sock";
 // Matches a single path segment: a bare vault name, or a locker name on its own //
 const VAULT_ID_PATTERN = vaultIdLib.SEGMENT_PATTERN;
 
-const app = express();
+let app = express();
+app.disable("x-powered-by");
 
 // Coarse per-IP cap on /login -- loginThrottle.js already locks out repeated bad passwords //
 const loginRateLimit = rateLimit({
@@ -122,7 +126,7 @@ app.post("/login", loginRateLimit, (req, res) => {
   res.cookie(auth.SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "strict",
-    secure: COOKIE_SECURE,
+    secure: tls.enabled,
     path: "/",
   });
   res.redirect(302, "/dashboard");
@@ -263,11 +267,11 @@ async function renderNewVault(req, res, error) {
 }
 
 app.get("/dashboard", auth.requireAuth, (req, res) => {
-  renderDashboard(req, res);
+  return renderDashboard(req, res);
 });
 
 app.get("/vaults/new", auth.requireAuth, (req, res) => {
-  renderNewVault(req, res);
+  return renderNewVault(req, res);
 });
 
 app.post("/vaults", auth.requireAuth, async (req, res) => {
@@ -279,7 +283,7 @@ app.post("/vaults", auth.requireAuth, async (req, res) => {
     return renderNewVault(req, res, "Invalid locker.");
   }
   const fullVaultId = vaultIdLib.joinVaultId(locker || "", vault_id);
-  const sizeMB = parseInt(size_mb, 10);
+  const sizeMB = Number.parseInt(size_mb, 10);
   if (!Number.isInteger(sizeMB) || sizeMB < 32) {
     return renderNewVault(req, res, "Size must be at least 32 MB.");
   }
@@ -314,7 +318,7 @@ app.post("/vaults", auth.requireAuth, async (req, res) => {
     if (!resp.ok) return renderNewVault(req, res, resp.error);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderNewVault(req, res, `Could not reach agent: ${err.message}`);
+    return renderNewVault(req, res, `Could not reach agent: ${err.message}`);
   }
 });
 
@@ -336,7 +340,7 @@ app.post("/vaults/:locker/:name/unseal", auth.requireAuth, async (req, res) => {
     if (!resp.ok) return renderDashboard(req, res, resp.error);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderDashboard(req, res, `Could not reach agent: ${err.message}`);
+    return renderDashboard(req, res, `Could not reach agent: ${err.message}`);
   }
 });
 
@@ -354,7 +358,7 @@ app.post("/vaults/:locker/:name/seal", auth.requireAuth, async (req, res) => {
     if (!resp.ok) return renderDashboard(req, res, resp.error);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderDashboard(req, res, `Could not reach agent: ${err.message}`);
+    return renderDashboard(req, res, `Could not reach agent: ${err.message}`);
   }
 });
 
@@ -402,7 +406,7 @@ app.get("/vaults/:locker/:name/settings", auth.requireAuth, (req, res) => {
   if (vaultId === null) {
     return res.status(404).type("html").send(views.notFoundPage());
   }
-  renderSettings(req, res, vaultId);
+  return renderSettings(req, res, vaultId);
 });
 
 app.post("/vaults/:locker/:name/settings", auth.requireAuth, async (req, res) => {
@@ -412,7 +416,14 @@ app.post("/vaults/:locker/:name/settings", auth.requireAuth, async (req, res) =>
   }
 
   const raw = req.body.services;
-  const requested = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  let requested;
+  if (Array.isArray(raw)) {
+    requested = raw;
+  } else if (raw) {
+    requested = [raw];
+  } else {
+    requested = [];
+  }
 
   try {
     const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
@@ -424,9 +435,9 @@ app.post("/vaults/:locker/:name/settings", auth.requireAuth, async (req, res) =>
     const known = new Set(resp.services || []);
     const services = requested.filter((s) => known.has(s));
     state.setVaultServices(vaultId, services);
-    renderSettings(req, res, vaultId, { saved: true });
+    return renderSettings(req, res, vaultId, { saved: true });
   } catch (err) {
-    renderSettings(req, res, vaultId, {
+    return renderSettings(req, res, vaultId, {
       error: `Could not reach agent: ${err.message}`,
     });
   }
@@ -458,7 +469,7 @@ app.post("/vaults/:locker/:name/destroy", auth.requireAuth, async (req, res) => 
     state.deleteVaultServices(vaultId);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderSettings(req, res, vaultId, {
+    return renderSettings(req, res, vaultId, {
       error: `Could not reach agent: ${err.message}`,
     });
   }
@@ -466,12 +477,17 @@ app.post("/vaults/:locker/:name/destroy", auth.requireAuth, async (req, res) => 
 
 // CSRF token missing/invalid: report clearly instead of the default error page //
 app.use((err, req, res, next) => {
-  if (err && err.code === "EBADCSRFTOKEN") {
+  if (err?.code === "EBADCSRFTOKEN") {
     return res.status(403).type("html").send(views.forbiddenPage());
   }
   next(err);
 });
 
-app.listen(PORT, () => {
-  console.log(`portcullio ui: listening on :${PORT}`);
+// HTTP by default for a TLS-terminating reverse proxy, PORTCULLIO_TLS=on for built-in HTTPS //
+const server = tls.enabled
+  ? https.createServer(tls.loadOrCreate(), app)
+  : http.createServer(app);
+
+server.listen(PORT, () => {
+  console.log(`portcullio ui: listening on ${tls.enabled ? "https" : "http"}://:${PORT}`);
 });

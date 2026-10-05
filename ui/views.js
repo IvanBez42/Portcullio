@@ -48,11 +48,16 @@ function statusBadge(state) {
   return `<span class="status-badge status-${escapeHtml(state)}">${escapeHtml(STATE_LABELS[state] || state)}</span>`;
 }
 
+function serviceChip(s) {
+  return `<span class="service-chip">${escapeHtml(s)}</span>`;
+}
+
 function serviceChips(services) {
   if (!services || services.length === 0) {
     return `<div class="linked-services"><span class="service-chip service-chip-empty">No services linked</span></div>`;
   }
-  return `<div class="linked-services">${services.map((s) => `<span class="service-chip">${escapeHtml(s)}</span>`).join("")}</div>`;
+  const chips = services.map(serviceChip).join("");
+  return `<div class="linked-services">${chips}</div>`;
 }
 
 function setupPage(error, csrfToken) {
@@ -188,8 +193,14 @@ function formatMB(mb) {
 function usageDetail(usedMB, totalMB) {
   if (!totalMB) return "";
   const pct = Math.min(100, Math.round(((usedMB || 0) / totalMB) * 100));
-  const level =
-    pct >= 90 ? "usage-danger" : pct >= 75 ? "usage-warn" : "usage-ok";
+  let level;
+  if (pct >= 90) {
+    level = "usage-danger";
+  } else if (pct >= 75) {
+    level = "usage-warn";
+  } else {
+    level = "usage-ok";
+  }
   return `
     <div class="usage-bar"><div class="usage-fill ${level}" style="width:${pct}%"></div></div>
     <p class="vault-detail">${formatMB(usedMB || 0)} of ${formatMB(totalMB)} used</p>`;

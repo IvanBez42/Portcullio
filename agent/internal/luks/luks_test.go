@@ -10,6 +10,14 @@ import (
 
 const testPassphrase = "test-passphrase-only"
 
+// Fails the test immediately if err is non-nil //
+func requireNoErr(t *testing.T, err error, label string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+}
+
 // Checks Open/Close work and are idempotent //
 func TestOpenCloseAndIdempotency(t *testing.T) {
 	loopback.RequireRoot(t)
@@ -17,21 +25,15 @@ func TestOpenCloseAndIdempotency(t *testing.T) {
 
 	dir := t.TempDir()
 	dev, err := loopback.Create(dir, 64)
-	if err != nil {
-		t.Fatalf("loopback.Create: %v", err)
-	}
+	requireNoErr(t, err, "loopback.Create")
 	t.Cleanup(func() {
 		if err := dev.TeardownAll(); err != nil {
 			t.Logf("teardown: %v", err)
 		}
 	})
 
-	if err := dev.Attach(); err != nil {
-		t.Fatalf("Attach: %v", err)
-	}
-	if err := dev.Format([]byte(testPassphrase)); err != nil {
-		t.Fatalf("Format: %v", err)
-	}
+	requireNoErr(t, dev.Attach(), "Attach")
+	requireNoErr(t, dev.Format([]byte(testPassphrase)), "Format")
 	loopPath := dev.LoopPath()
 	const mapperName = "portcullio-luks-selftest"
 
@@ -42,14 +44,10 @@ func TestOpenCloseAndIdempotency(t *testing.T) {
 		}
 	})
 
-	if err := luks.Open(loopPath, mapperName, []byte(testPassphrase)); err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	requireNoErr(t, luks.Open(loopPath, mapperName, []byte(testPassphrase)), "Open")
 
 	mapped, err := luks.IsMapped(mapperName)
-	if err != nil {
-		t.Fatalf("IsMapped: %v", err)
-	}
+	requireNoErr(t, err, "IsMapped")
 	if !mapped {
 		t.Fatalf("IsMapped = false right after Open")
 	}
@@ -64,25 +62,17 @@ func TestOpenCloseAndIdempotency(t *testing.T) {
 	}
 
 	// Checks re-opening an open mapper is a no-op //
-	if err := luks.Open(loopPath, mapperName, []byte(testPassphrase)); err != nil {
-		t.Fatalf("second Open (should be idempotent no-op): %v", err)
-	}
+	requireNoErr(t, luks.Open(loopPath, mapperName, []byte(testPassphrase)), "second Open (should be idempotent no-op)")
 
-	if err := luks.Close(mapperName); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	requireNoErr(t, luks.Close(mapperName), "Close")
 	mapped, err = luks.IsMapped(mapperName)
-	if err != nil {
-		t.Fatalf("IsMapped after Close: %v", err)
-	}
+	requireNoErr(t, err, "IsMapped after Close")
 	if mapped {
 		t.Fatalf("IsMapped = true after Close")
 	}
 
 	// Checks re-closing a closed mapper is a no-op //
-	if err := luks.Close(mapperName); err != nil {
-		t.Fatalf("second Close (should be idempotent no-op): %v", err)
-	}
+	requireNoErr(t, luks.Close(mapperName), "second Close (should be idempotent no-op)")
 }
 
 // Checks AttachLoop is idempotent //
@@ -92,9 +82,7 @@ func TestAttachLoopIdempotent(t *testing.T) {
 
 	dir := t.TempDir()
 	dev, err := loopback.Create(dir, 64)
-	if err != nil {
-		t.Fatalf("loopback.Create: %v", err)
-	}
+	requireNoErr(t, err, "loopback.Create")
 	imagePath := dev.BackingPath()
 
 	var loopPath string
@@ -110,25 +98,19 @@ func TestAttachLoopIdempotent(t *testing.T) {
 	})
 
 	loopPath, err = luks.AttachLoop(imagePath)
-	if err != nil {
-		t.Fatalf("AttachLoop: %v", err)
-	}
+	requireNoErr(t, err, "AttachLoop")
 	if loopPath == "" {
 		t.Fatalf("AttachLoop returned empty loop path")
 	}
 
 	again, err := luks.AttachLoop(imagePath)
-	if err != nil {
-		t.Fatalf("second AttachLoop (should be idempotent): %v", err)
-	}
+	requireNoErr(t, err, "second AttachLoop (should be idempotent)")
 	if again != loopPath {
 		t.Fatalf("second AttachLoop returned %q, want existing %q", again, loopPath)
 	}
 
 	found, ok, err := luks.FindLoopDevice(imagePath)
-	if err != nil {
-		t.Fatalf("FindLoopDevice: %v", err)
-	}
+	requireNoErr(t, err, "FindLoopDevice")
 	if !ok {
 		t.Fatalf("FindLoopDevice: ok = false, want true")
 	}

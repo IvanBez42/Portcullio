@@ -16,9 +16,9 @@
   var hint = document.getElementById("space-hint");
   if (!lockerSelect) return;
   lockerSelect.addEventListener("change", function () {
-    var option = lockerSelect.selectedOptions && lockerSelect.selectedOptions[0];
+    var option = lockerSelect?.selectedOptions[0];
     var raw = option ? option.dataset.available : "";
-    var availableMB = parseInt(raw, 10);
+    var availableMB = Number.parseInt(raw, 10);
     var known = Number.isFinite(availableMB) && availableMB > 0;
     var max = known ? availableMB : 1048576; // 1 TB fallback, unconstrained in practice
 

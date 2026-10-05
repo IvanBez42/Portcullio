@@ -21,9 +21,8 @@ func requireDocker(t *testing.T) {
 func randomName(t *testing.T, prefix string) string {
 	t.Helper()
 	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("generate random container name suffix: %v", err)
-	}
+	_, err := rand.Read(b)
+	requireNoErr(t, err, "generate random container name suffix")
 	return prefix + "-" + hex.EncodeToString(b)
 }
 
@@ -53,6 +52,22 @@ func containerRunning(t *testing.T, name string) bool {
 	return strings.TrimSpace(string(out)) == "true"
 }
 
+// Fails the test immediately if err is non-nil //
+func requireNoErr(t *testing.T, err error, label string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+}
+
+// Fails the test immediately if err is nil //
+func requireErr(t *testing.T, err error, msg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal(msg)
+	}
+}
+
 // Checks ordinary containers are linkable without any label //
 func TestLinkableContainersIncludesOrdinaryContainers(t *testing.T) {
 	requireDocker(t)
@@ -60,9 +75,7 @@ func TestLinkableContainersIncludesOrdinaryContainers(t *testing.T) {
 	createContainer(t, name)
 
 	names, err := dockerctl.LinkableContainers()
-	if err != nil {
-		t.Fatalf("LinkableContainers: %v", err)
-	}
+	requireNoErr(t, err, "LinkableContainers")
 	got := map[string]bool{}
 	for _, n := range names {
 		got[n] = true
@@ -83,9 +96,7 @@ func TestLinkableContainersExcludesAgentAndUI(t *testing.T) {
 	createContainer(t, ordinary)
 
 	names, err := dockerctl.LinkableContainers()
-	if err != nil {
-		t.Fatalf("LinkableContainers: %v", err)
-	}
+	requireNoErr(t, err, "LinkableContainers")
 	got := map[string]bool{}
 	for _, n := range names {
 		got[n] = true
@@ -105,24 +116,18 @@ func TestLinkableContainersExcludesAgentAndUI(t *testing.T) {
 func TestStartRefusesUnknownContainerName(t *testing.T) {
 	requireDocker(t)
 
-	if err := dockerctl.Start([]string{"not-a-real-container"}); err == nil {
-		t.Fatalf("Start succeeded with a nonexistent container name, want refusal")
-	}
+	requireErr(t, dockerctl.Start([]string{"not-a-real-container"}), "Start succeeded with a nonexistent container name, want refusal")
 
 	agentLike := randomName(t, "portcullio-agent")
 	createContainer(t, agentLike)
-	if err := dockerctl.Start([]string{agentLike}); err == nil {
-		t.Fatalf("Start succeeded targeting an agent-like container name, want refusal")
-	}
+	requireErr(t, dockerctl.Start([]string{agentLike}), "Start succeeded targeting an agent-like container name, want refusal")
 }
 
 // Checks Stop refuses an unlinkable container name //
 func TestStopRefusesUnknownContainerName(t *testing.T) {
 	requireDocker(t)
 
-	if err := dockerctl.Stop([]string{"not-a-real-container"}); err == nil {
-		t.Fatalf("Stop succeeded with a nonexistent container name, want refusal")
-	}
+	requireErr(t, dockerctl.Stop([]string{"not-a-real-container"}), "Stop succeeded with a nonexistent container name, want refusal")
 }
 
 func TestStartActuallyStartsContainer(t *testing.T) {
@@ -130,9 +135,7 @@ func TestStartActuallyStartsContainer(t *testing.T) {
 	name := randomName(t, "portcullio-test-start")
 	createContainer(t, name)
 
-	if err := dockerctl.Start([]string{name}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	requireNoErr(t, dockerctl.Start([]string{name}), "Start")
 	if !containerRunning(t, name) {
 		t.Fatalf("%s not running after Start", name)
 	}
@@ -143,16 +146,12 @@ func TestStopActuallyStopsContainer(t *testing.T) {
 	name := randomName(t, "portcullio-test-stop")
 	createContainer(t, name)
 
-	if err := dockerctl.Start([]string{name}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	requireNoErr(t, dockerctl.Start([]string{name}), "Start")
 	if !containerRunning(t, name) {
 		t.Fatalf("%s not running after Start", name)
 	}
 
-	if err := dockerctl.Stop([]string{name}); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
+	requireNoErr(t, dockerctl.Stop([]string{name}), "Stop")
 	if containerRunning(t, name) {
 		t.Fatalf("%s still running after Stop", name)
 	}
