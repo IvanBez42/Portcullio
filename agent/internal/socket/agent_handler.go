@@ -63,30 +63,36 @@ func (h *AgentHandler) listVaultIDs() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("socket: list vaults in %s: %w", h.cfg.InputDir, err)
 	}
-	var ids []string
+	ids := imageNames(entries)
 	for _, e := range entries {
-		if e.IsDir() {
-			// unreadable locker dir (e.g. unmounted drive) is skipped, not fatal //
-			lockerEntries, err := os.ReadDir(filepath.Join(h.cfg.InputDir, e.Name()))
-			if err != nil {
-				continue
-			}
-			for _, le := range lockerEntries {
-				if le.IsDir() {
-					continue
-				}
-				if ext := filepath.Ext(le.Name()); ext == ".img" {
-					ids = append(ids, e.Name()+"/"+strings.TrimSuffix(le.Name(), ext))
-				}
-			}
+		if !e.IsDir() {
 			continue
 		}
-		if ext := filepath.Ext(e.Name()); ext == ".img" {
-			ids = append(ids, strings.TrimSuffix(e.Name(), ext))
+		// unreadable locker dir (e.g. unmounted drive) is skipped, not fatal //
+		lockerEntries, err := os.ReadDir(filepath.Join(h.cfg.InputDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		for _, name := range imageNames(lockerEntries) {
+			ids = append(ids, e.Name()+"/"+name)
 		}
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+// Names of the .img files in entries, extension stripped //
+func imageNames(entries []os.DirEntry) []string {
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if ext := filepath.Ext(e.Name()); ext == ".img" {
+			names = append(names, strings.TrimSuffix(e.Name(), ext))
+		}
+	}
+	return names
 }
 
 // Lists every locker (subdirectory of InputDir) //

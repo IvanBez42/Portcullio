@@ -84,7 +84,7 @@ function loadOrCreate({
     }
     const cert = fs.readFileSync(certPath, "utf8");
     if (isExpired(cert))
-      console.warn(`portcullio ui: warning: ${certPath} has expired`);
+      console.warn("portcullio ui: warning: certificate from PORTCULLIO_TLS_CERT has expired");
     return { cert, key: fs.readFileSync(keyPath, "utf8") };
   }
 
