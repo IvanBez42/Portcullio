@@ -17,6 +17,9 @@ const tls = require("./tls");
 
 const PORT = process.env.PORT || 8080;
 
+// Only mark cookies Secure once a TLS-terminating proxy sits in front of ui //
+const COOKIE_SECURE = process.env.PORTCULLIO_COOKIE_SECURE === "true";
+
 // Fixed socket path //
 const AGENT_SOCKET_PATH = "/socket/agent.sock";
 

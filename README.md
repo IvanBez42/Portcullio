@@ -86,6 +86,7 @@ All environmental variables are optional and are set to reasonable and tested va
 | `PORTCULLIO_STARTUP_RECONCILE_TIMEOUT`       | `2s`    | `agent`    | Same idea, but for the one-time auto-heal check at agent startup -- deliberately shorter so a bad locker can't hang the whole daemon from starting. |
 | `PORTCULLIO_STARTUP_RECONCILE_POLL_INTERVAL` | `100ms` | `agent`    | Poll interval for the startup check above.                                                                                                          |
 | `PORT`                                       | `8080`  | `ui`       | Port the web UI listens on inside its container.                                                                                                    |
+| `PORTCULLIO_COOKIE_SECURE`                   | `false` | `ui`       | Set to `true` once a TLS-terminating reverse proxy sits in front of `ui`. Leave `false` for plain HTTP (localhost/LAN/VPN) -- browsers silently drop `Secure` cookies over HTTP, which would break login. |
 
 To set any of these, add an `environment:` block to the relevant service in the compose file above.
 
