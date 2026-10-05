@@ -12,8 +12,8 @@ const CERT_VALID_DAYS = 3650; // 10y //
 const OPENSSL = "/usr/bin/openssl"; // absolute so $PATH can't swap in a fake binary //
 
 function parseMode(value) {
-  if (value === undefined || value === "" || value === "on") return true;
-  if (value === "off") return false;
+  if (value === "on") return true;
+  if (value === undefined || value === "" || value === "off") return false;
   throw new Error(
     `tls: invalid PORTCULLIO_TLS=${JSON.stringify(value)} (expected "on" or "off")`,
   );

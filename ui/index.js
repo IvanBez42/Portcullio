@@ -480,7 +480,7 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-// HTTPS by default; PORTCULLIO_TLS=off for a TLS-terminating reverse proxy //
+// HTTP by default for a TLS-terminating reverse proxy, PORTCULLIO_TLS=on for built-in HTTPS //
 const server = tls.enabled
   ? https.createServer(tls.loadOrCreate(), app)
   : http.createServer(app);
