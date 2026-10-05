@@ -264,11 +264,11 @@ async function renderNewVault(req, res, error) {
 }
 
 app.get("/dashboard", auth.requireAuth, (req, res) => {
-  renderDashboard(req, res);
+  return renderDashboard(req, res);
 });
 
 app.get("/vaults/new", auth.requireAuth, (req, res) => {
-  renderNewVault(req, res);
+  return renderNewVault(req, res);
 });
 
 app.post("/vaults", auth.requireAuth, async (req, res) => {
@@ -315,7 +315,7 @@ app.post("/vaults", auth.requireAuth, async (req, res) => {
     if (!resp.ok) return renderNewVault(req, res, resp.error);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderNewVault(req, res, `Could not reach agent: ${err.message}`);
+    return renderNewVault(req, res, `Could not reach agent: ${err.message}`);
   }
 });
 
@@ -337,7 +337,7 @@ app.post("/vaults/:locker/:name/unseal", auth.requireAuth, async (req, res) => {
     if (!resp.ok) return renderDashboard(req, res, resp.error);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderDashboard(req, res, `Could not reach agent: ${err.message}`);
+    return renderDashboard(req, res, `Could not reach agent: ${err.message}`);
   }
 });
 
@@ -355,7 +355,7 @@ app.post("/vaults/:locker/:name/seal", auth.requireAuth, async (req, res) => {
     if (!resp.ok) return renderDashboard(req, res, resp.error);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderDashboard(req, res, `Could not reach agent: ${err.message}`);
+    return renderDashboard(req, res, `Could not reach agent: ${err.message}`);
   }
 });
 
@@ -403,7 +403,7 @@ app.get("/vaults/:locker/:name/settings", auth.requireAuth, (req, res) => {
   if (vaultId === null) {
     return res.status(404).type("html").send(views.notFoundPage());
   }
-  renderSettings(req, res, vaultId);
+  return renderSettings(req, res, vaultId);
 });
 
 app.post("/vaults/:locker/:name/settings", auth.requireAuth, async (req, res) => {
@@ -432,9 +432,9 @@ app.post("/vaults/:locker/:name/settings", auth.requireAuth, async (req, res) =>
     const known = new Set(resp.services || []);
     const services = requested.filter((s) => known.has(s));
     state.setVaultServices(vaultId, services);
-    renderSettings(req, res, vaultId, { saved: true });
+    return renderSettings(req, res, vaultId, { saved: true });
   } catch (err) {
-    renderSettings(req, res, vaultId, {
+    return renderSettings(req, res, vaultId, {
       error: `Could not reach agent: ${err.message}`,
     });
   }
@@ -466,7 +466,7 @@ app.post("/vaults/:locker/:name/destroy", auth.requireAuth, async (req, res) => 
     state.deleteVaultServices(vaultId);
     res.redirect(302, "/dashboard");
   } catch (err) {
-    renderSettings(req, res, vaultId, {
+    return renderSettings(req, res, vaultId, {
       error: `Could not reach agent: ${err.message}`,
     });
   }

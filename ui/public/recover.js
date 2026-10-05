@@ -6,13 +6,21 @@
     var hint = box.querySelector(".copy-hint");
     if (!code || !hint || !navigator.clipboard) return;
     var copy = function () {
-      navigator.clipboard.writeText(code.textContent).then(function () {
-        var original = hint.textContent;
-        hint.textContent = "Copied";
-        setTimeout(function () {
-          hint.textContent = original;
-        }, 1500);
-      });
+      navigator.clipboard.writeText(code.textContent).then(
+        function () {
+          flash("Copied");
+        },
+        function () {
+          flash("Copy failed, select and copy manually");
+        },
+      );
+    };
+    var flash = function (message) {
+      var original = hint.textContent;
+      hint.textContent = message;
+      setTimeout(function () {
+        hint.textContent = original;
+      }, 1500);
     };
     box.addEventListener("click", copy);
     box.addEventListener("keydown", function (e) {
