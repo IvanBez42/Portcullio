@@ -4,7 +4,8 @@ const crypto = require("node:crypto");
 const { doubleCsrf } = require("csrf-csrf");
 const state = require("./state");
 const auth = require("./auth");
-const tls = require("./tls");
+
+const CSRF_COOKIE = "portcullio_csrf";
 
 // Persists the secret so outstanding CSRF cookies survive a container restart //
 function getOrCreateSecret() {
@@ -22,14 +23,9 @@ const { doubleCsrfProtection, invalidCsrfTokenError } = doubleCsrf({
   getSecret: () => CSRF_SECRET,
   getSessionIdentifier: (req) =>
     req.cookies?.[auth.SESSION_COOKIE] || "anonymous",
-  cookieName: "portcullio_csrf",
-  cookieOptions: {
-    sameSite: "strict",
-    path: "/",
-    secure: tls.enabled,
-    httpOnly: true,
-  },
+  cookieName: CSRF_COOKIE,
+  cookieOptions: auth.COOKIE_OPTIONS,
   getCsrfTokenFromRequest: (req) => req.body?._csrf,
 });
 
-module.exports = { doubleCsrfProtection, invalidCsrfTokenError };
+module.exports = { CSRF_COOKIE, doubleCsrfProtection, invalidCsrfTokenError };

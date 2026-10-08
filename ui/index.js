@@ -47,6 +47,13 @@ app.use((req, res, next) => {
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
+
+// No cached pages, so Back can't resubmit a form with a stale CSRF token //
+app.use((req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
+
 app.use(csrf.doubleCsrfProtection);
 
 // Whether the request's cookie is still a live session //
@@ -123,18 +130,13 @@ app.post("/login", loginRateLimit, (req, res) => {
   }
   loginThrottle.recordSuccess(req.ip);
   const token = auth.createSession();
-  res.cookie(auth.SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: tls.enabled,
-    path: "/",
-  });
+  res.cookie(auth.SESSION_COOKIE, token, auth.COOKIE_OPTIONS);
   res.redirect(302, "/dashboard");
 });
 
 app.post("/logout", auth.requireAuth, (req, res) => {
   auth.destroySession(req.cookies[auth.SESSION_COOKIE]);
-  res.clearCookie(auth.SESSION_COOKIE);
+  auth.clearSessionCookie(res);
   res.redirect(302, "/login");
 });
 
@@ -475,10 +477,12 @@ app.post("/vaults/:locker/:name/destroy", auth.requireAuth, async (req, res) => 
   }
 });
 
-// CSRF token missing/invalid: report clearly instead of the default error page //
+// Broken CSRF cookie: drop it and start over at /login //
 app.use((err, req, res, next) => {
   if (err?.code === "EBADCSRFTOKEN") {
-    return res.status(403).type("html").send(views.forbiddenPage());
+    res.clearCookie(csrf.CSRF_COOKIE, auth.COOKIE_OPTIONS);
+    if (!hasValidSession(req)) auth.clearSessionCookie(res);
+    return res.redirect(303, "/login");
   }
   next(err);
 });

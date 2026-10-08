@@ -2,10 +2,19 @@
 
 const crypto = require("node:crypto");
 const state = require("./state");
+const tls = require("./tls");
 
 const SCRYPT_KEYLEN = 64;
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const SESSION_COOKIE = "portcullio_session";
+
+// Shared by every cookie so clearCookie matches what was set //
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "strict",
+  secure: tls.enabled,
+  path: "/",
+};
 
 const RECOVERY_CODE_TTL_MS = 30 * 60 * 1000; // 30m
 const RECOVERY_CODE_COOLDOWN_MS = 10 * 60 * 1000; // 10m Recovery Code cooldown
@@ -144,10 +153,15 @@ function isValidSession(token) {
   return true;
 }
 
-// Go to login if not logged in //
+function clearSessionCookie(res) {
+  res.clearCookie(SESSION_COOKIE, COOKIE_OPTIONS);
+}
+
+// Go to login if not logged in, dropping a dead session cookie //
 function requireAuth(req, res, next) {
   const token = req.cookies?.[SESSION_COOKIE];
   if (!isValidSession(token)) {
+    if (token) clearSessionCookie(res);
     return res.redirect(302, "/login");
   }
   next();
@@ -155,6 +169,8 @@ function requireAuth(req, res, next) {
 
 module.exports = {
   SESSION_COOKIE,
+  COOKIE_OPTIONS,
+  clearSessionCookie,
   hasAdmin,
   setAdminPassword,
   checkAdminPassword,
