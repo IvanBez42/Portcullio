@@ -5,7 +5,7 @@ const { doubleCsrf } = require("csrf-csrf");
 const state = require("./state");
 const auth = require("./auth");
 
-const CSRF_COOKIE = "portcullio_csrf";
+const CSRF_COOKIE = `${auth.COOKIE_PREFIX}portcullio_csrf`;
 
 // Persists the secret so outstanding CSRF cookies survive a container restart //
 function getOrCreateSecret() {

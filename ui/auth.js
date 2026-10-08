@@ -6,7 +6,9 @@ const tls = require("./tls");
 
 const SCRYPT_KEYLEN = 64;
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24h
-const SESSION_COOKIE = "portcullio_session";
+// __Host- under TLS so http and https cookies never collide on one host //
+const COOKIE_PREFIX = tls.enabled ? "__Host-" : "";
+const SESSION_COOKIE = `${COOKIE_PREFIX}portcullio_session`;
 
 // Shared by every cookie so clearCookie matches what was set //
 const COOKIE_OPTIONS = {
@@ -168,6 +170,7 @@ function requireAuth(req, res, next) {
 }
 
 module.exports = {
+  COOKIE_PREFIX,
   SESSION_COOKIE,
   COOKIE_OPTIONS,
   clearSessionCookie,
