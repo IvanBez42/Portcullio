@@ -2,6 +2,7 @@ version: 2
 updates:
   - package-ecosystem: "gomod"
     directory: "/agent"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     groups:
@@ -11,6 +12,7 @@ updates:
 
   - package-ecosystem: "npm"
     directory: "/ui"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     groups:
@@ -20,6 +22,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     groups:
@@ -31,6 +34,7 @@ updates:
     directories:
       - "/agent"
       - "/ui"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     groups:

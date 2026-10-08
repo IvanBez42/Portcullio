@@ -137,20 +137,6 @@ function notFoundPage() {
   return layout("Not found", `<h1>Not found</h1>`);
 }
 
-// Shown when a form's CSRF token is missing or stale //
-function forbiddenPage() {
-  return layout(
-    "Portcullio - request rejected",
-    `
-    <div class="page-header">
-      <h1>Request rejected</h1>
-      ${backLink("/login", "Log in")}
-    </div>
-    <p class="error-text">Your form session expired or the request could not be verified. Go back and try again.</p>
-  `,
-  );
-}
-
 function vaultRow(vault, csrfToken) {
   const id = escapeHtml(vault.vault_id);
   const urlPath = escapeHtml(vaultIdLib.urlPathFor(vault.vault_id));
@@ -341,7 +327,6 @@ module.exports = {
   loginPage,
   recoverPage,
   notFoundPage,
-  forbiddenPage,
   dashboardPage,
   newVaultPage,
   settingsPage,
