@@ -18,8 +18,12 @@ const (
 	socketPath = "/socket/agent.sock"
 )
 
+// Set at build time via -ldflags "-X main.version=..." //
+var version = "unknown"
+
 func main() {
 	cfg := loadHandlerConfig()
+	log.Println("portcullio agent: version", version)
 
 	startupTimeout := getEnvDuration("PORTCULLIO_STARTUP_RECONCILE_TIMEOUT", 2*time.Second)
 	startupPoll := getEnvDuration("PORTCULLIO_STARTUP_RECONCILE_POLL_INTERVAL", 100*time.Millisecond)
@@ -81,6 +85,7 @@ func loadHandlerConfig() socket.HandlerConfig {
 		Fstype:            getEnv("PORTCULLIO_FSTYPE", "ext4"),
 		SealHandleTimeout: getEnvDuration("PORTCULLIO_SEAL_HANDLE_TIMEOUT", 10*time.Second),
 		SealPollInterval:  getEnvDuration("PORTCULLIO_SEAL_POLL_INTERVAL", 200*time.Millisecond),
+		Version:           version,
 	}
 }
 

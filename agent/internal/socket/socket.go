@@ -21,6 +21,7 @@ const (
 	VerbDestroy  = "destroy"
 	VerbServices = "services"
 	VerbSpace    = "space"
+	VerbVersion  = "version"
 )
 
 // Bounds a single request/response line //

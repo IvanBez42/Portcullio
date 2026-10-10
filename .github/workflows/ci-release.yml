@@ -70,6 +70,15 @@ jobs:
             echo "CHANNEL=dev" >> "$GITHUB_ENV"
           fi
 
+      # One version for both images: release or channel + short sha
+      - name: Pick build version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=${CHANNEL}-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -83,6 +92,7 @@ jobs:
           context: ./agent
           file: ./agent/Dockerfile
           push: true
+          build-args: PORTCULLIO_VERSION=${{ env.VERSION }}
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/portcullio-agent:${{ env.CHANNEL }}
             ghcr.io/${{ env.OWNER_LC }}/portcullio-agent:${{ github.sha }}
@@ -93,6 +103,7 @@ jobs:
           context: ./ui
           file: ./ui/Dockerfile
           push: true
+          build-args: PORTCULLIO_VERSION=${{ env.VERSION }}
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/portcullio-ui:${{ env.CHANNEL }}
             ghcr.io/${{ env.OWNER_LC }}/portcullio-ui:${{ github.sha }}

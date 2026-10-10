@@ -405,6 +405,22 @@ func TestSpaceReportsAvailableMB(t *testing.T) {
 	}
 }
 
+// Checks the version verb reports the configured build version //
+func TestVersionReportsBuildVersion(t *testing.T) {
+	cfg := newHandlerConfig(t)
+	cfg.Version = "dev-abc1234"
+	handler := socket.NewAgentHandler(cfg)
+	sockPath := startServer(t, handler)
+
+	resp := call(t, sockPath, socket.Request{Verb: socket.VerbVersion})
+	if !resp.OK {
+		t.Fatalf("version: %s", resp.Error)
+	}
+	if resp.Version != cfg.Version {
+		t.Fatalf("Version = %q, want %q", resp.Version, cfg.Version)
+	}
+}
+
 // Checks status refuses an invalid vault_id //
 func TestStatusRefusesInvalidVaultID(t *testing.T) {
 	cfg := newHandlerConfig(t)

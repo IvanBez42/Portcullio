@@ -10,6 +10,7 @@ const VERB_CREATE = "create";
 const VERB_DESTROY = "destroy";
 const VERB_SERVICES = "services";
 const VERB_SPACE = "space";
+const VERB_VERSION = "version";
 
 const DEFAULT_TIMEOUT_MS = 30000;
 
@@ -98,4 +99,5 @@ module.exports = {
   VERB_DESTROY,
   VERB_SERVICES,
   VERB_SPACE,
+  VERB_VERSION,
 };

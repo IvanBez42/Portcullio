@@ -168,6 +168,14 @@ button:hover {
 .error-text {
   color: var(--red);
 }
+.version-text {
+  margin-top: 2rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.version-mismatch {
+  color: var(--red);
+}
 .success-text {
   color: var(--green);
 }

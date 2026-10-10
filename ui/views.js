@@ -224,7 +224,16 @@ function lockerControl(availableMB, lockers) {
     <label for="locker">Locker <select id="locker" name="locker">${rootOption}${lockerOptions}</select></label>`;
 }
 
-function dashboardPage({ vaults, error, csrfToken }) {
+// UI and agent build versions, red when they differ //
+function versionLine({ ui, agent }) {
+  const agentText = agent || "unknown";
+  const mismatch = ui !== agentText;
+  const cls = mismatch ? "version-text version-mismatch" : "version-text";
+  const title = mismatch ? ` title="UI and agent are running different builds"` : "";
+  return `<p class="${cls}"${title}>UI ${escapeHtml(ui)} · Agent ${escapeHtml(agentText)}</p>`;
+}
+
+function dashboardPage({ vaults, error, versions, csrfToken }) {
   const list = vaults.length
     ? `<div class="vault-grid">${vaults.map((v) => vaultRow(v, csrfToken)).join("")}</div>`
     : `<p>No vaults yet.</p>`;
@@ -243,6 +252,7 @@ function dashboardPage({ vaults, error, csrfToken }) {
     </div>
     ${error ? `<p class="error-text">${escapeHtml(error)}</p>` : ""}
     ${list}
+    ${versionLine(versions)}
   `,
   );
 }

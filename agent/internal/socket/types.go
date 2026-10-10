@@ -42,6 +42,7 @@ type Response struct {
 	Services    []string      `json:"services,omitempty"`
 	AvailableMB int64         `json:"available_mb,omitempty"`
 	Lockers     []LockerSpace `json:"lockers,omitempty"`
+	Version     string        `json:"version,omitempty"`
 }
 
 // Listens on a Unix socket, dispatches to an AgentHandler //
@@ -59,6 +60,8 @@ type HandlerConfig struct {
 
 	SealHandleTimeout time.Duration
 	SealPollInterval  time.Duration
+
+	Version string // build version reported by the version verb //
 }
 
 // The real, production Handler //

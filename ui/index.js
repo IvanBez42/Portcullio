@@ -20,6 +20,9 @@ const PORT = process.env.PORT || 8080;
 // Only mark cookies Secure once a TLS-terminating proxy sits in front of ui //
 const COOKIE_SECURE = process.env.PORTCULLIO_COOKIE_SECURE === "true";
 
+// Set at image build time; shown only on the logged-in dashboard //
+const VERSION = process.env.PORTCULLIO_VERSION || "unknown";
+
 // Fixed socket path //
 const AGENT_SOCKET_PATH = "/socket/agent.sock";
 
@@ -207,8 +210,21 @@ app.post("/recover", (req, res) => {
   res.redirect(302, "/login");
 });
 
+// Agent's build version, or null if unreachable or it predates the version verb //
+async function getAgentVersion() {
+  try {
+    const resp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
+      verb: agentClient.VERB_VERSION,
+    });
+    return resp.ok ? resp.version : null;
+  } catch {
+    return null;
+  }
+}
+
 // Renders vault status and linked services //
 async function renderDashboard(req, res, error) {
+  const versions = { ui: VERSION, agent: await getAgentVersion() };
   try {
     const statusResp = await agentClient.callAgent(AGENT_SOCKET_PATH, {
       verb: agentClient.VERB_STATUS,
@@ -218,6 +234,7 @@ async function renderDashboard(req, res, error) {
         views.dashboardPage({
           vaults: [],
           error: error || statusResp.error,
+          versions,
           csrfToken: req.csrfToken(),
         }),
       );
@@ -228,12 +245,20 @@ async function renderDashboard(req, res, error) {
     }));
     res
       .type("html")
-      .send(views.dashboardPage({ vaults, error, csrfToken: req.csrfToken() }));
+      .send(
+        views.dashboardPage({
+          vaults,
+          error,
+          versions,
+          csrfToken: req.csrfToken(),
+        }),
+      );
   } catch (err) {
     res.type("html").send(
       views.dashboardPage({
         vaults: [],
         error: `Could not reach agent: ${err.message}`,
+        versions,
         csrfToken: req.csrfToken(),
       }),
     );

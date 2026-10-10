@@ -186,6 +186,8 @@ func (h *AgentHandler) Handle(req Request) Response {
 		return h.handleServices(req)
 	case VerbSpace:
 		return h.handleSpace(req)
+	case VerbVersion:
+		return Response{OK: true, Version: h.cfg.Version}
 	default:
 		return errResp(fmt.Errorf("socket: unknown verb %q", req.Verb))
 	}
