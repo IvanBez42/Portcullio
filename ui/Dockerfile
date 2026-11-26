@@ -1,4 +1,4 @@
-FROM node:lts-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
+FROM node:lts-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
 RUN apk add --no-cache openssl && test -x /usr/bin/openssl
 WORKDIR /app
 COPY package.json package-lock.json ./
